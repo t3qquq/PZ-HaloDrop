@@ -1,5 +1,6 @@
 -- Halo Drop HUD: 화면 위쪽 가운데에 상태·고도·키 안내를 한 줄로 그린다
--- B42 FBO 렌더러는 OnPostFloorLayerDraw 를 발화하지 않아 퐁듀처럼 OnPreUIDraw 에서 그린다.
+-- B42 FBO 렌더러는 OnPostFloorLayerDraw 를 발화하지 않는다. OnPreUIDraw 는 UI 요소보다 먼저 그려져
+-- 하늘 뷰(HaloDropSky, 전체화면 UI)에 가려졌으므로(런 4) OnPostUIDraw(바닐라 TutorialSetup 과 같은 훅)에서 그린다.
 
 if isServer() then return end
 
@@ -32,7 +33,7 @@ local function lineFor(J)
     return nil
 end
 
-local function onPreUIDraw()
+local function onPostUIDraw()
     local J = HaloDrop.J
     if not J or not J.state then return end
     local text = lineFor(J)
@@ -49,4 +50,4 @@ local function onPreUIDraw()
         tm:DrawStringCentre(UIFont.Small, x, y + 30, hint, 1, 1, 1, 0.9)
     end
 end
-Events.OnPreUIDraw.Add(onPreUIDraw)
+Events.OnPostUIDraw.Add(onPostUIDraw)

@@ -19,7 +19,8 @@ HaloDrop.PHYS_PER_FLOOR = 2.46               -- 차량 물리 y <-> 층. 퐁듀 
 HaloDrop.PREP_MS      = 5000                 -- 라운드 시작 방송 후 수송기가 A 를 떠나기까지
 HaloDrop.JUMP_PLANE_GRACE_MS = 8000          -- 점프: 발밑 땅이 올라온 뒤 수송기 없이 기다리는 최대 시간
 HaloDrop.JUMP_PLANE_BEHIND   = 40            -- 점프 수송기 시작 위치: 점프 지점 뒤쪽(타일). 클라 로드 창(±52칸) 안
-HaloDrop.JUMP_PLANE_AHEAD    = 60            -- 점프 수송기 끝 위치: 점프 지점 앞쪽(타일). 지나면 제거
+HaloDrop.JUMP_PLANE_AHEAD    = 40            -- 점프 수송기 끝 위치: 점프 지점 앞쪽(타일). 지나면 제거 (런 4: 60 은 로드 창 밖이라 skipped 만 늘었다)
+HaloDrop.JUMP_PLANE_SPEED    = 12            -- 점프 수송기 통과 속도(타일/초). 비행 속도(48)로는 1초 만에 지나가 안 보였다(런 4) -> 뒤 40칸 3.3초, 앞 40칸 3.3초
 HaloDrop.JUMP_PLANE_MAX_MS   = 20000         -- 점프 수송기 최대 수명(서버). 클라 PlaneDone 이 안 와도 지운다
 
 -- 착지 감속. 퐁듀 zombierain.lua 의 LAND_SPEED / FREE_FALL_BRAKE_H 와 같은 값.
@@ -52,9 +53,10 @@ HaloDrop.SKY = {
     LEAD       = 90,     -- 지도 중심을 진행 방향으로 당기는 거리(타일). 기체 앞쪽이 더 보이게
     SCENE_FRAC = 0.42,   -- 기체 씬 한 변 = 화면 짧은 변 x 이 값
     SCENE_DY   = 0.0,    -- 기체 씬 세로 위치 보정(화면 높이 비율, + 는 아래)
-    SCENE_ZOOM = 8,      -- ISUI3DScene setZoom (1~20)
+    SCENE_ZOOM = 3,      -- ISUI3DScene setZoom (1~20). 보이는 폭 = 1366/(e^(0.2*zoom)*88) 유닛: 3 -> 8.5
+    SCENE_SCALE = 0.12,  -- 기체 객체 배율(getObjectScale). C-17 53 m x 0.12 = 6.4 유닛. 런 4: 배율 없이는 동체 조각만 보였다
     TILT       = 30,     -- 기체를 내려다보는 각도(도). Wingsmith VIEW_TILT 와 같은 출발값
-    YAW0       = 45,     -- 기수 방향 보정(도). 런에서 맞춘다
+    YAW0       = 45,     -- 기수 방향 보정(도). 런에서 맞춘다 (하늘 뷰 중 [ ] ; ' , . PgUp PgDn 으로 조정, 로그 sky tune:)
     COVER_RATE = 2.0,    -- 구름 덮개 알파가 목표로 수렴하는 속도(1/초)
     TILE_LOADS_PER_FRAME = 2,  -- 타일 텍스처를 프레임당 몇 장까지 새로 읽을지 (히치 방지)
     TINT_NIGHT = 0.35,   -- 밤(낮 밝기 0)일 때 타일 밝기 배율

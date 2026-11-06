@@ -3,7 +3,8 @@
 -- 설계 B (11-06): 비행 구간엔 월드 차량이 없다(클라 청크 스트리밍이 48 타일/초를 못 따라와 차량이 사라짐,
 --   claude/HaloDrop_설계.md 2절). E 를 누르면 서버가 점프 지점 근처에 차량을 띄우고 이 클라에 물리 권한을
 --   넘긴다(JumpPlane). 이 클라는 그 차량을 점프 지점 뒤 JUMP_PLANE_BEHIND 에서 앞 JUMP_PLANE_AHEAD 까지
---   PlaneSpeed 로 끌고 지나간 뒤 PlaneDone 을 보낸다. 점프 지점을 지나는 순간 HaloDropJumper.onPlanePassed().
+--   JUMP_PLANE_SPEED 로 끌고 지나간 뒤 PlaneDone 을 보낸다. 차량을 처음 잡은 순간 HaloDropJumper.onPlaneAcquired()
+--   (구름을 걷어 다가오는 수송기를 보여준다), 점프 지점을 지나는 순간 HaloDropJumper.onPlanePassed().
 -- 이동: setWorldTransform (내부 Bullet.teleportVehicle). 목적지 칸이 이 클라에 안 올라와 있으면 그 틱은
 --   옮기지 않는다 -- 옮겨 봐야 BaseVehicle.update 가 이전 청크 안으로 되돌린다(b42.21 :3430~3450).
 -- 높이 PlaneZ(층) x PHYS_PER_FLOOR.
@@ -91,11 +92,12 @@ local function pilotTick()
         -- 차량이 이 클라에 보이기 시작한 순간부터 시계를 돈다 (그 전엔 어차피 못 옮긴다)
         _run.startMs = now
         log(string.format("jump plane acquired vid=%s at (%.1f,%.1f) %dms after assign", tostring(_run.vid), v:getX(), v:getY(), now - _run.assignedMs))
+        if HaloDropJumper and HaloDropJumper.onPlaneAcquired then HaloDropJumper.onPlaneAcquired() end
     end
     _run.lostAt = nil
     local t = (now - _run.startMs) / 1000
-    local speed = C.fl.speed
-    -- 뒤 BEHIND 에서 출발해 PlaneSpeed 로 전진. 점프 지점 통과 시각 = BEHIND / speed
+    local speed = HaloDrop.JUMP_PLANE_SPEED
+    -- 뒤 BEHIND 에서 출발해 JUMP_PLANE_SPEED 로 전진. 점프 지점 통과 시각 = BEHIND / speed
     local s = -HaloDrop.JUMP_PLANE_BEHIND + speed * t
     local x, y = _run.x0 + _run.dx * s, _run.y0 + _run.dy * s
     if s >= 0 and not _run.passed then

@@ -284,6 +284,17 @@ local function jump(p, why)
     J.jump = nil
 end
 
+-- 파일럿(HaloDropPilot)이 점프 수송기를 이 클라에서 잡았다: 구름을 걷고 하늘 뷰를 닫아 다가오는 수송기를 보여준다.
+-- 캐릭터는 아직 JUMPING(제자리 hold). 런 4 에선 통과 순간에야 닫혀 수송기가 보이기도 전에 지나갔다.
+function HaloDropJumper.onPlaneAcquired()
+    if J.state ~= "JUMPING" or not J.jump then return end
+    if HaloDropSky.isOpen() then
+        HaloDropSky.setCover(0)
+        HaloDropSky.close("plane acquired")
+        log("jump: plane acquired -> sky closed, waiting for pass")
+    end
+end
+
 -- 수송기가 머리 위를 지났다고 파일럿(HaloDropPilot)이 알려온다
 function HaloDropJumper.onPlanePassed()
     if J.state == "JUMPING" and J.jump then J.jump.planeSeen = true end
