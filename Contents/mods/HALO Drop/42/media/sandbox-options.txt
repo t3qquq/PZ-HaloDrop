@@ -129,3 +129,8 @@ option HaloDrop.JumpWaitMax = {
     type = integer, min = 5, max = 180, default = 45,
     page = HaloDrop, translation = HaloDrop_JumpWaitMax,
 }
+
+option HaloDrop.SkyScale = {
+    type = double, min = 0.25, max = 8.0, default = 1.5,
+    page = HaloDrop, translation = HaloDrop_SkyScale,
+}

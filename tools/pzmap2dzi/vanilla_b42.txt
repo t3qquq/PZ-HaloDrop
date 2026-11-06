@@ -1,0 +1,7 @@
+# B42 용 vanilla.txt 대체: 텍스처팩 이름이 B41 과 달라 전부 읽는다 (conf/vanilla.txt 를 이 내용으로 바꿀 것)
+default:
+    map_path: '{pz_root}/media/maps/Muldraugh, KY'
+    texture: true
+    texture_path: '{pz_root}/media/texturepacks'
+    texture_files:
+        - '.*[.]pack'

@@ -1,0 +1,5 @@
+# Halo Drop 오일리그 맵 (워크샵이 아니라 로컬 모드 폴더 -> 절대 경로)
+OilRig:
+    map_path: 'C:/Users/t3qquq/Zomboid/Workshop/(개인모드) HALO Drop/Contents/mods/HALO OilRig/42/media/maps/OilRig'
+    texture: false
+    depend: []

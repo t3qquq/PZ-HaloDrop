@@ -56,6 +56,8 @@ HaloDrop.SKY = {
     TILT       = 30,     -- 기체를 내려다보는 각도(도). Wingsmith VIEW_TILT 와 같은 출발값
     YAW0       = 45,     -- 기수 방향 보정(도). 런에서 맞춘다
     COVER_RATE = 2.0,    -- 구름 덮개 알파가 목표로 수렴하는 속도(1/초)
+    TILE_LOADS_PER_FRAME = 2,  -- 타일 텍스처를 프레임당 몇 장까지 새로 읽을지 (히치 방지)
+    TINT_NIGHT = 0.35,   -- 밤(낮 밝기 0)일 때 타일 밝기 배율
 }
 
 function HaloDrop.log(msg)

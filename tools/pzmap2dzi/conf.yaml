@@ -1,0 +1,69 @@
+# Halo Drop 하늘 뷰 타일용 pzmap2dzi 설정 (blind-coder/pzmap2dzi, B42)
+# 사용: pzmap2dzi 폴더의 conf/conf.yaml 을 이 파일로, conf/mod/halodrop.txt 를 mod/halodrop.txt 로 덮어쓴 뒤
+#   python main.py copy
+#   python main.py unpack
+#   python main.py render base
+# 출력: E:/pzmap/html/base (바닐라), E:/pzmap/html/mod_maps/OilRig/base (리그). 그 다음 tools/make_sky_tiles.py.
+pz_root: |-
+    E:/Steam/steamapps/common/ProjectZomboid
+
+output_path: |-
+    E:/pzmap
+
+mod_root: |-
+    E:/Steam/steamapps/workshop/content/108600
+
+custom_root: |-
+    .
+
+map_conf_default: default.txt
+map_conf:
+    - vanilla.txt
+    - mod/
+
+use_depend_texture_only: false
+
+base_map: default
+mod_maps:
+    - OilRig
+
+render_conf:
+    verbose: true
+    profile: false
+    worker_count: 6          # i5-9600K 6코어
+    break_key: ''
+
+    tile_size: 1024
+    # 지상 + 4층까지. 4 px/칸 이하 축척에선 그 위 층은 거의 안 보인다
+    layer_range: [0, 5]
+    # 고운 5레벨(128,64,32,16,8 px/칸)은 디스크에 안 쓴다 -> 4, 2, 1 px/칸부터 남는다
+    omit_levels: 5
+
+    image_fmt: webp
+    image_fmt_base_layer0: jpg
+    image_save_options:
+        jpg: {quality: 90}
+
+    # omit_levels 가 디스크 쓰기를 건너뛰려면 캐시가 켜져 있어야 한다 (python 3.8+). 메모리 상한 MB
+    enable_cache: true
+    cache_limit_mb: 6000
+    top_view_square_size: 1
+
+    plants_conf:
+        snow: false
+        large_bush: false
+        flower: false
+        season: summer2
+        tree_size: 2
+        jumbo_tree_size: 4
+        jumbo_tree_type: 0
+        no_ground_cover: false
+        unify_tree_type: -1
+
+    top_view_color_mode: avg
+    default_font: arial.ttf
+    default_font_size: 20
+    zombie_count: false
+    vehicle: false
+    special_zombie: false
+    story: false

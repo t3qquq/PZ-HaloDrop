@@ -5,8 +5,9 @@
 --   claude/Wingsmith_하늘뷰_분석.md).
 -- 구조
 --   getWorld():setDrawWorld(false)  월드 렌더를 끈다 (바닐라 ISWorldMap 이 지도를 열 때 쓰는 API).
---   SkyMap   전체화면 ISUIElement + UIWorldMap(바닐라 월드맵 렌더러, 아이소메트릭). 비행 위치에 centerOn.
---            media/maps/HaloDropSky/pyramid.zip 이 있으면 래스터 레이어(사진)로, 없으면 벡터 지도로 그려진다.
+--   SkyTiles 전체화면 ISUIElement 에 pzmap2dzi 아이소 렌더 타일(HaloDropMap.levels)을 직접 깐다 (Wingsmith 식).
+--            화면 배율 = 샌드박스 SkyScale(px/칸). 타일이 없으면(HaloDropTiles.lua 부재) 아래 SkyMap 으로 대체.
+--   SkyMap   전체화면 ISUIElement + UIWorldMap(바닐라 월드맵 벡터 렌더러, 아이소메트릭). 타일 없을 때의 폴백.
 --   SkyScene 전체화면 ISUIElement + ISUI3DScene 에 수송기 차량 스크립트 모델. 화면 가운데 고정, 기수만 돌림.
 --            구름 덮개(점프 대기 중)·HUD 는 HaloDropHUD 가 OnPreUIDraw 로 그린다.
 -- 호출: HaloDropJumper 가 board() 에서 open, 자유낙하 시작 때 close. 점프 대기(JUMPING) 중엔 setCover(1).
@@ -16,6 +17,7 @@ if isServer() then return end
 
 require "HaloDropConfig"
 require "HaloDropFlight"
+require "HaloDropMap"
 require "ISUI/ISUIElement"
 require "ISUI/Maps/ISMapDefinitions"
 require "Vehicles/ISUI/ISUI3DScene"
@@ -27,7 +29,102 @@ HaloDropSky.S = S
 local function log(msg) HaloDrop.log(msg) end
 local K = HaloDrop.SKY
 
--- ── 지도 레이어 ───────────────────────────────────────────────────────────────
+-- ── 타일 레이어 (Wingsmith 식 직접 그리기) ──────────────────────────────────────
+local SkyTiles = ISUIElement:derive("HaloDropSkyTiles")
+
+function SkyTiles:new()
+    local core = getCore()
+    local o = ISUIElement:new(0, 0, core:getScreenWidth(), core:getScreenHeight())
+    setmetatable(o, self)
+    self.__index = self
+    o.tex = {}        -- key -> Texture | false(없음)
+    o.loads = 0
+    o.drawn, o.missing = 0, 0
+    o.nextLog = nil
+    return o
+end
+
+-- 텍스처는 바닐라 getTexture 가 캐시한다(해제 없음). 프레임당 새로 읽는 수를 제한해 히치를 줄인다.
+function SkyTiles:tile(L, c, r)
+    local key = L.id .. ":" .. c .. "_" .. r
+    local t = self.tex[key]
+    if t ~= nil then return t or nil end
+    if not HaloDropMap.has(L, c, r) then
+        self.tex[key] = false
+        return nil
+    end
+    if self.loads >= K.TILE_LOADS_PER_FRAME then return nil end
+    self.loads = self.loads + 1
+    local path = L.path .. c .. "_" .. r .. ".jpg"
+    local ok, tx = pcall(function() return getTexture(path) end)
+    if ok and tx then
+        self.tex[key] = tx
+        return tx
+    end
+    self.tex[key] = false
+    log("sky tiles: missing " .. path .. (ok and "" or (" err=" .. tostring(tx))))
+    return nil
+end
+
+function SkyTiles:prerender()
+    if S.open then pcall(function() getWorld():setDrawWorld(false) end) end
+    self.loads = 0
+    local scale = HaloDrop.opt("SkyScale")
+    local L = HaloDropMap.levelFor(scale)
+    if not L or not S.cx then
+        self:drawRect(0, 0, self.width, self.height, 1, HaloDropMap.BG.r, HaloDropMap.BG.g, HaloDropMap.BG.b)
+        return
+    end
+    local k = scale / L.px                     -- 타일 px -> 화면 px
+    local size = HaloDropMap.TILE * k
+    local cxp, cyp = HaloDropMap.toMap(L, S.cx, S.cy)
+    local ax, ay = self.width / 2, self.height / 2
+    -- 화면 (0,0) 에 해당하는 타일 픽셀 좌표
+    local mx0, my0 = cxp - ax / k, cyp - ay / k
+    local c0, r0 = math.floor(mx0 / HaloDropMap.TILE), math.floor(my0 / HaloDropMap.TILE)
+    local c1 = math.floor((mx0 + self.width / k) / HaloDropMap.TILE)
+    local r1 = math.floor((my0 + self.height / k) / HaloDropMap.TILE)
+    local tint = S.tint or 1
+    self:drawRect(0, 0, self.width, self.height, 1, HaloDropMap.BG.r * tint, HaloDropMap.BG.g * tint, HaloDropMap.BG.b * tint)
+    local drawn, missing = 0, 0
+    for r = r0, r1 do
+        for c = c0, c1 do
+            local t = self:tile(L, c, r)
+            if t then
+                local x = math.floor((c * HaloDropMap.TILE - mx0) * k + 0.5)
+                local y = math.floor((r * HaloDropMap.TILE - my0) * k + 0.5)
+                local x2 = math.floor(((c + 1) * HaloDropMap.TILE - mx0) * k + 0.5)
+                local y2 = math.floor(((r + 1) * HaloDropMap.TILE - my0) * k + 0.5)
+                self:drawTextureScaled(t, x, y, x2 - x, y2 - y, 1, tint, tint, tint)
+                drawn = drawn + 1
+            elseif HaloDropMap.has(L, c, r) then
+                missing = missing + 1
+            end
+        end
+    end
+    self.drawn, self.missing, self.level = drawn, missing, L
+    local now = getTimestampMs()
+    if not self.nextLog or now >= self.nextLog then
+        self.nextLog = now + 5000
+        log(string.format("sky tiles: level=%s scale=%.2f k=%.3f center=(%.0f,%.0f) tiles c%d..%d r%d..%d drawn=%d pending=%d",
+            tostring(L.id), scale, k, S.cx, S.cy, c0, c1, r0, r1, drawn, missing))
+    end
+end
+
+function SkyTiles:render()
+    if S.cover > 0.002 then
+        self:drawRect(0, 0, self.width, self.height, 0.92 * S.cover, 0.86, 0.88, 0.92)
+    end
+end
+
+function SkyTiles:onMouseDown() return true end
+function SkyTiles:onMouseUp() return true end
+function SkyTiles:onMouseMove() return true end
+function SkyTiles:onRightMouseDown() return true end
+function SkyTiles:onRightMouseUp() return true end
+function SkyTiles:onMouseWheel() return true end
+
+-- ── 지도 레이어 (벡터 폴백) ───────────────────────────────────────────────────────────────
 local SkyMap = ISUIElement:derive("HaloDropSkyMap")
 
 function SkyMap:new()
@@ -184,7 +281,13 @@ function HaloDropSky.open()
     S.cx, S.cy, S.yaw = nil, nil, nil
     local ok, err = pcall(function()
         getWorld():setDrawWorld(false)
-        S.map = SkyMap:new()
+        if HaloDropMap.hasTiles() then
+            S.map = SkyTiles:new()
+            S.mode = "tiles"
+        else
+            S.map = SkyMap:new()
+            S.mode = "vector"
+        end
         S.map:initialise()
         S.map:instantiate()
         S.map:addToUIManager()
@@ -200,7 +303,7 @@ function HaloDropSky.open()
         HaloDropSky.close("open failed")
         return
     end
-    log("sky: opened (world drawing off)")
+    log("sky: opened (world drawing off, map=" .. tostring(S.mode) .. ")")
 end
 
 function HaloDropSky.close(reason)
@@ -230,6 +333,11 @@ function HaloDropSky.update(x, y, headingDeg, dt)
     -- 아이소 지도에서 월드 방향 (dx,dy) 의 화면 각도: 화면 x = dx - dy, 화면 y = (dx + dy)/2
     local sx, sy = math.cos(r) - math.sin(r), (math.cos(r) + math.sin(r)) / 2
     S.yaw = math.deg(math.atan2(sy, sx))
+    -- 밤이면 타일을 어둡게 (바닐라 낮 밝기 0~1 을 TINT_NIGHT~1 로)
+    local okD, day = pcall(function() return getClimateManager():getDayLightStrength() end)
+    if okD and type(day) == "number" then
+        S.tint = K.TINT_NIGHT + (1 - K.TINT_NIGHT) * math.max(0, math.min(1, day))
+    end
     -- 구름 덮개 서서히
     local k = (dt or 0) * K.COVER_RATE
     if k > 1 then k = 1 end
