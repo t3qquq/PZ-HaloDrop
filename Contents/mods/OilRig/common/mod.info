@@ -1,0 +1,6 @@
+name=Oil Rig (HALO Drop)
+poster=poster.png
+id=t3OilRig
+description=Decommissioned oil rig start location for HALO Drop. Ported to B42 from Oilrig_Lv (workshop 3662426998).
+versionMin=42.21
+modversion=0.1.0
