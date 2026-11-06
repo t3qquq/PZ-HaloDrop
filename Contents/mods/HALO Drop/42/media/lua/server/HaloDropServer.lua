@@ -137,8 +137,11 @@ end
 -- 회수: 착용 목록·인벤토리 양쪽에서 전부 지운다. 지운 게 있으면 true.
 local function chuteTake(p, reason)
     local removed = 0
+    local worn = p:getWornItems()
     for _, item in ipairs(wornChutes(p)) do
+        -- removeWornItem 은 multi-item 위치에선 no-op 이라(11-06 실측) 남으면 WornItems:remove 로 직접 뺀다
         pcall(function() p:removeWornItem(item) end)
+        if worn:contains(item) then pcall(function() worn:remove(item) end) end
         removed = removed + 1
     end
     local item = findChute(p)

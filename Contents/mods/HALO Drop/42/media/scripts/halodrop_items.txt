@@ -8,8 +8,10 @@ module HaloDrop
     /* 플레이어 낙하산 외형. 낙하산을 펼친 순간 서버가 지급·착용시키고 착지하면 회수한다
        (HaloDropServer.lua). 모델·텍스처는 퐁듀 좀비 낙하산(PongDu_ZombieParachute)과 같고,
        원본은 Parachuting Start 모드(Panopticon, Glytch3r, Sapph, Dante271)의 OpenParachute.
-       퐁듀 좀비용은 가방(Back) 슬롯이라 플레이어 배낭과 겹치므로, 퐁듀 숨김 의류처럼
-       base:zeddmg 위치의 숨김 아이템으로 둔다. */
+       퐁듀 좀비용은 가방(Back) 슬롯이라 플레이어 배낭과 겹친다.
+       base:zeddmg 는 multi-item 위치라(BodyLocations.lua setMultiItem) removeWornItem 으로
+       벗겨지지 않는다(11-06 실측: 착지 후 영원히 남음). 단일 슬롯이고 바닐라에선 토끼꼬리·
+       스피포꼬리만 쓰는 base:tail 을 쓴다. */
     item HaloDropParachute
     {
         DisplayCategory = ZedDmg,
@@ -17,7 +19,7 @@ module HaloDrop
         Icon            = HaloDropParachute,
         Weight          = 0,
         ItemType        = base:clothing,
-        BodyLocation    = base:zeddmg,
+        BodyLocation    = base:tail,
         ClothingItem    = HaloDrop_Parachute,
         WorldRender     = false,
         hidden          = true,

@@ -89,13 +89,22 @@ local function chuteWear(p)
     return ok
 end
 
+-- removeWornItem 은 WornItems.setItem(loc, nil) 이라 multi-item 위치에선 아무것도 안 지운다
+-- (11-06 실측, base:zeddmg). 지금은 단일 슬롯 base:tail 이지만, 그래도 남으면 WornItems:remove 로 직접 뺀다.
 local function chuteUnwear(p, reason)
     local items = wornChutes(p)
     if #items == 0 then return 0 end
+    local worn = p:getWornItems()
     for _, item in ipairs(items) do
         local ok, err = pcall(function() p:removeWornItem(item) end)
+        local still = worn:contains(item)
+        if still then
+            pcall(function() worn:remove(item) end)
+            still = worn:contains(item)
+        end
         log("chute unwear (" .. tostring(reason) .. ") ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err)))
-            .. " id=" .. tostring(item:getID()) .. " inInventory=" .. tostring(item:getContainer() ~= nil))
+            .. " id=" .. tostring(item:getID()) .. " inInventory=" .. tostring(item:getContainer() ~= nil)
+            .. " stillWorn=" .. tostring(still))
     end
     p:resetModelNextFrame()
     return #items
@@ -163,7 +172,16 @@ Events.OnClothingUpdated.Add(onClothingUpdated)
 
 -- ── 위치 제어 ─────────────────────────────────────────────────────────────────
 -- setForceX/Y = x, next, last 동시 설정 (IsoMovingObject). setZ 는 lastZ 도 같이 정하고 31 로 자른다.
+-- 멀리 옮길 때(목적지 청크 미로드)는 먼저 removeFromSquare() 로 current/last 칸 참조를 끊어야 한다.
+-- 안 끊으면 IsoMovingObject.postupdate 가 "현재 칸 없음 + last 있음" 을 보고 직전 칸 중앙으로 되돌린다
+-- (11-06 실측: A 로 못 가고 리그 (19210.5,272.5) 에 붙박임). 바닐라 원격 플레이어 갱신과 같은 순서.
+local FAR_JUMP = 32
 local function hold(p, x, y, z)
+    local dx, dy = x - p:getX(), y - p:getY()
+    if dx * dx + dy * dy > FAR_JUMP * FAR_JUMP then
+        log(string.format("far move (%.0f,%.0f) -> (%.0f,%.0f): removeFromSquare", p:getX(), p:getY(), x, y))
+        pcall(function() p:removeFromSquare() end)
+    end
     p:setForceX(x)
     p:setForceY(y)
     p:setZ(z)
