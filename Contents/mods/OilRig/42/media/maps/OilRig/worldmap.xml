@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<world>
+  <!-- Oil rig footprint for the world map / minimap. B42 cell 75,1; points are cell-local (0..256). -->
+  <cell x="75" y="1">
+    <feature>
+      <geometry type="Polygon">
+        <coordinates>
+          <point x="0" y="0"/>
+          <point x="27" y="0"/>
+          <point x="27" y="32"/>
+          <point x="0" y="32"/>
+        </coordinates>
+      </geometry>
+      <properties>
+        <property name="building" value="Industrial"/>
+      </properties>
+    </feature>
+  </cell>
+</world>
