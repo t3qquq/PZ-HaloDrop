@@ -5,8 +5,7 @@
 --   t0       경로 경과 0 에 해당하는 로컬 getTimestampMs (서버가 보낸 경과 ms 로 역산)
 --   id       라운드 번호
 --   aboard   [key] = true  아직 수송기에 탄 사람
---   pilotKey 수송기 차량을 모는 클라 (HaloDropPilot.lua)
---   vid      수송기 차량 id (없으면 nil)
+--   jump     내 점프 수송기 { vid, x, y } (서버 JumpPlane, HaloDropPilot.lua 가 끈다). 없으면 nil
 --   ended    경로 끝 / 어드민 종료
 
 if isServer() then return end
@@ -56,7 +55,11 @@ local function hideTick()
     local want = HaloDrop.opt("HideCarried") and C.fl ~= nil and not C.ended
     local function shouldHide(k)
         if not want or not C.aboard[k] then return false end
-        if k == mine then return HaloDrop.J ~= nil and HaloDrop.J.state == "ABOARD" end
+        if k == mine then
+            -- 뛰어내려 자유낙하가 시작되는 순간까지 숨긴다 (JUMPING 은 아직 구름 속)
+            local st = HaloDrop.J ~= nil and HaloDrop.J.state or nil
+            return st == "ABOARD" or st == "JUMPING"
+        end
         return true
     end
     -- 숨김 해제: 내린 사람, 라운드 끝, 옵션 끔
@@ -93,8 +96,7 @@ function HaloDrop.onServerCommand(module, command, args)
         C.id = args.id
         C.fl = { ax = args.ax, ay = args.ay, bx = args.bx, by = args.by, speed = args.speed, durMs = args.dur }
         C.t0 = getTimestampMs() - args.elapsed
-        C.pilotKey = args.pilot
-        C.vid = args.vid
+        C.jump = nil
         C.ended = false
         local n = 0
         local amMember = false
@@ -104,9 +106,8 @@ function HaloDrop.onServerCommand(module, command, args)
             n = n + 1
             if k == mine then amMember = true end
         end
-        log(string.format("flight %d A=(%.0f,%.0f) B=(%.0f,%.0f) elapsed=%d dur=%d members=%d me=%s member=%s pilot=%s vid=%s",
-            C.id, C.fl.ax, C.fl.ay, C.fl.bx, C.fl.by, args.elapsed, C.fl.durMs, n, tostring(mine),
-            tostring(amMember), tostring(C.pilotKey), tostring(C.vid)))
+        log(string.format("flight %d A=(%.0f,%.0f) B=(%.0f,%.0f) elapsed=%d dur=%d members=%d me=%s member=%s",
+            C.id, C.fl.ax, C.fl.ay, C.fl.bx, C.fl.by, args.elapsed, C.fl.durMs, n, tostring(mine), tostring(amMember)))
         if amMember and HaloDropJumper then HaloDropJumper.board() end
     elseif command == "ChuteWear" then
         if HaloDropJumper then HaloDropJumper.onChuteWear() end
@@ -116,12 +117,14 @@ function HaloDrop.onServerCommand(module, command, args)
         return
     elseif command == "Member" then
         C.aboard[args.key] = args.aboard or nil
-    elseif command == "Pilot" then
-        C.pilotKey = args.pilot
-        C.vid = args.vid
-        log("pilot -> " .. tostring(C.pilotKey) .. " (me=" .. tostring(myKey()) .. ")")
+    elseif command == "JumpPlane" then
+        C.jump = { vid = args.vid, x = args.x, y = args.y }
+        if HaloDropPilot then HaloDropPilot.onJumpPlane(args) end
     elseif command == "PlaneGone" then
-        C.vid = nil
+        if C.jump and C.jump.vid == args.vid then
+            C.jump = nil
+            if HaloDropPilot then HaloDropPilot.cancel("server removed") end
+        end
     elseif command == "End" then
         C.ended = true
         log("round " .. tostring(C.id) .. " end")

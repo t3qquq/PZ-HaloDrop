@@ -1,7 +1,10 @@
 -- Halo Drop 점퍼: 자기 캐릭터의 탑승·자유낙하·낙하산·착지
 --
--- 상태: nil -> ABOARD -> FREEFALL -> CANOPY -> nil(착지)
---   ABOARD    수송기 경로 위치에 붙잡는다 (실제 z = CarryZ). Flight 수신 즉시 A 로 옮겨진다.
+-- 상태: nil -> ABOARD -> JUMPING -> FREEFALL -> CANOPY -> nil(착지)
+--   ABOARD    제자리(리그)에 숨긴 채 움직임만 막는다. 경로 위치는 숫자로만 돌고 하늘 뷰(HaloDropSky)가 그린다.
+--             (이전: A 로 옮겨 경로를 따라 끌고 다님 -> 48 타일/초를 클라 청크 스트리밍이 못 따라와 폐기, 11-06 런 3)
+--   JUMPING   E 를 누른 순간 경로 위치로 옮겨 CarryZ 에 붙잡고, 구름 덮개 아래서 발밑 청크·수송기를 기다린다.
+--             발밑 칸이 올라오고 수송기가 머리 위를 지나면(또는 JumpWaitMax 초과) FREEFALL.
 --   FREEFALL  가상 고도를 수직 속도로 줄인다. 상호작용 키로 낙하산
 --   CANOPY    낙하산. 수직·수평 속도가 캐노피 목표치로 서서히 수렴한다
 -- 실제 z 처리 (HaloDropConfig.lua 고도 체계 참고)
@@ -30,6 +33,7 @@ if isServer() then return end
 
 require "HaloDropConfig"
 require "HaloDropFlight"
+require "HaloDropSky"
 
 HaloDropJumper = {}
 
@@ -226,6 +230,7 @@ local function finish(p)
     J.state = nil
     planeSoundStop(p)
     p:setBlockMovement(false)
+    HaloDropSky.close("finish")
 end
 
 function HaloDropJumper.board()
@@ -237,14 +242,34 @@ function HaloDropJumper.board()
     J.released = false
     J.chuteSent = false
     J.vz, J.vh = 0, 0
+    J.jump = nil
     planeSoundStart(p)
-    log(string.format("board: from (%.1f,%.1f,%.1f) -> A=(%.0f,%.0f)", p:getX(), p:getY(), p:getZ(), HaloDrop.C.fl.ax, HaloDrop.C.fl.ay))
+    HaloDropSky.open()
+    log(string.format("board: staying at (%.1f,%.1f,%.1f), route A=(%.0f,%.0f)", p:getX(), p:getY(), p:getZ(), HaloDrop.C.fl.ax, HaloDrop.C.fl.ay))
 end
 
-local function jump(p, reason)
+-- E: 경로 현재 위치로 옮기고 구름 아래서 땅·수송기를 기다린다 (JUMPING)
+local function startJump(p, reason)
     if J.state ~= "ABOARD" then return end
+    local C = HaloDrop.C
+    local now = getTimestampMs()
+    local x, y = HaloDropFlight.pos(C.fl, now - C.t0)
+    J.state = "JUMPING"
+    J.x, J.y = x, y
+    J.jump = { at = now, groundAt = nil, planeSeen = false, reason = reason }
+    HaloDropSky.setCover(1)
+    send(p, "Jumped", { id = C.id, reason = reason, x = math.floor(x), y = math.floor(y) })
+    hold(p, x, y, HaloDrop.opt("CarryZ"))
+    log(string.format("jump start (%s): moved to route (%.0f,%.0f) frac=%.3f, waiting for ground (max %ds)",
+        reason, x, y, HaloDropFlight.frac(C.fl, now - C.t0), HaloDrop.opt("JumpWaitMax")))
+end
+
+-- JUMPING -> FREEFALL. why 는 로그용 (plane passed / ground only / timeout / forced)
+local function jump(p, why)
+    if J.state ~= "JUMPING" then return end
+    local jp = J.jump or {}
+    local now = getTimestampMs()
     J.state = "FREEFALL"
-    J.x, J.y = p:getX(), p:getY()
     J.alt = HaloDrop.opt("JumpAltitude")
     J.heading = HaloDropFlight.headingDeg(HaloDrop.C.fl)
     J.pitch = 0
@@ -252,8 +277,16 @@ local function jump(p, reason)
     J.vh = HaloDrop.C.fl.speed
     J.vz = 0
     planeSoundStop(p)
-    send(p, "Jumped", { id = HaloDrop.C.id, reason = reason })
-    log(string.format("jump (%s) at (%.1f,%.1f) alt=%.0fm heading=%.0f", reason, J.x, J.y, J.alt, J.heading))
+    HaloDropSky.close("freefall")
+    log(string.format("jump (%s) at (%.1f,%.1f) alt=%.0fm heading=%.0f waited=%dms ground=%s plane=%s",
+        why, J.x, J.y, J.alt, J.heading, now - (jp.at or now),
+        jp.groundAt and tostring(jp.groundAt - jp.at) .. "ms" or "no", tostring(jp.planeSeen)))
+    J.jump = nil
+end
+
+-- 수송기가 머리 위를 지났다고 파일럿(HaloDropPilot)이 알려온다
+function HaloDropJumper.onPlanePassed()
+    if J.state == "JUMPING" and J.jump then J.jump.planeSeen = true end
 end
 
 local function openChute(p, reason)
@@ -278,7 +311,8 @@ end
 
 function HaloDropJumper.onRoundEnd()
     local p = getPlayer()
-    if p and J.state == "ABOARD" then jump(p, "forced") end
+    if not p then return end
+    if J.state == "ABOARD" then startJump(p, "forced") end
 end
 
 -- ── 매 틱 ─────────────────────────────────────────────────────────────────────
@@ -312,14 +346,40 @@ local function onPlayerUpdate(p)
     if J.state == "ABOARD" then
         local C = HaloDrop.C
         if not C.fl then
-            -- 라운드 정보가 사라졌다(Closed 수신 등): 그 자리에서 강하
-            jump(p, "lost flight")
+            -- 라운드 정보가 사라졌다(Closed 수신 등): 탑승 취소
+            log("aboard: flight lost -> cancel")
+            finish(p)
             return
         end
+        -- 제자리에 숨은 채 대기. 경로 위치는 하늘 뷰에만 쓴다
         local x, y = HaloDropFlight.pos(C.fl, now - C.t0)
-        hold(p, x, y, carryZ)
-        local fx, fy = HaloDropFlight.dir(C.fl)
+        HaloDropSky.update(x, y, HaloDropFlight.headingDeg(C.fl), dt)
+        p:setLastFallSpeed(0)
+        return
+    end
+
+    if J.state == "JUMPING" then
+        local C = HaloDrop.C
+        local jp = J.jump
+        hold(p, J.x, J.y, carryZ)
+        local fx, fy = 1, 0
+        if C.fl then fx, fy = HaloDropFlight.dir(C.fl) end
         p:setForwardDirection(fx, fy)
+        if C.fl then HaloDropSky.update(J.x, J.y, HaloDropFlight.headingDeg(C.fl), dt) end
+        local waited = now - jp.at
+        if not jp.groundAt and p:getSquare() ~= nil then
+            jp.groundAt = now
+            log(string.format("jump: ground loaded after %dms at (%.0f,%.0f)", waited, J.x, J.y))
+        end
+        local maxMs = HaloDrop.opt("JumpWaitMax") * 1000
+        if jp.planeSeen then
+            jump(p, "plane passed")
+        elseif waited > maxMs then
+            jump(p, "timeout")
+        elseif jp.groundAt and not C.jump and now - jp.groundAt > HaloDrop.JUMP_PLANE_GRACE_MS then
+            -- 땅은 올라왔는데 서버가 수송기를 못 띄웠다(스폰 실패 등): 그냥 떨어진다
+            jump(p, "ground only")
+        end
         return
     end
 
@@ -399,7 +459,7 @@ local function onKeyPressed(key)
     if not p then return end
     if J.state == "ABOARD" then
         local C = HaloDrop.C
-        if C.fl and getTimestampMs() - C.t0 >= 0 then jump(p, "key") end
+        if C.fl and getTimestampMs() - C.t0 >= 0 then startJump(p, "key") end
     elseif J.state == "FREEFALL" then
         openChute(p, "key")
     end

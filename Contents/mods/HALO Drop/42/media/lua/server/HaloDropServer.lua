@@ -5,13 +5,15 @@
 --   서버: 라운드·탑승자 목록, 수송기 스폰·제거·물리 권한 이전, 낙하산 지급·회수
 --   클라: 자기 캐릭터의 위치·고도·낙하 속도 (HaloDropJumper.lua), 파일럿 클라의 차량 이동 (HaloDropPilot.lua)
 -- 경로: 비행 박스(샌드박스 WorldX1~Y2, 타일) 를 가로지르는 무작위 직선. A/B 는 박스 둘레 위의 점이다
---   (배그처럼 맵 한쪽 끝에서 반대쪽으로). 탑승자는 Flight 수신 즉시 A 로 옮겨져 붙잡힌다.
--- 수송기 차량은 퐁듀 좀비 공습 투하와 같은 방식이다: addVehicleDebug -> authorizationChanged(파일럿)
---   -> 파일럿 클라가 매 틱 setWorldTransform. 서버 setWorldTransform 은 Bullet 이동을 하지 않는다.
+--   (배그처럼 맵 한쪽 끝에서 반대쪽으로). 탑승자는 제자리(리그)에 숨은 채 대기하고, 비행 위치는 숫자로만
+--   돈다 (설계 B, 11-06: 클라 청크 스트리밍이 비행 속도를 못 따라와 경로를 따라 끌고 다니는 방식 폐기).
+-- 수송기 차량은 점프 순간에만 존재한다: 클라 Jumped(x,y) -> 그 칸의 청크가 서버에 올라오면
+--   addVehicleDebug -> authorizationChanged(그 플레이어) -> JumpPlane -> 그 클라가 몇 초 끌고 지나간 뒤
+--   PlaneDone -> permanentlyRemove. 서버 setWorldTransform 은 Bullet 이동을 하지 않는다.
 --   [소스 42.20.2] addVehicleDebug 는 IsoChunk.doSpawnedVehiclesInInvalidPosition 이 false 면 차량을
 --   월드에 넣지 않고 객체만 돌려준다(실내 칸 = 차량존 없고 isOutside 아님, 또는 다른 차량과 겹침).
 --   그 경우 addToWorld -> createPhysics 가 안 돌아 getId() 가 영원히 -1 이다 (11-06 실측: 리그 z0 칸).
---   그래서 A 청크가 서버에 로드된 뒤 실외 칸을 골라 스폰하고, id 가 -1 이면 다른 칸으로 재시도한다.
+--   그래서 청크가 로드된 뒤 실외 칸을 골라 스폰하고, id 가 -1 이면 다른 칸으로 재시도한다.
 -- 낙하산 착용·해제는 클라가 한다. B42 에서 착용 상태는 클라가 SyncClothing 으로 서버에 올리므로
 --   서버가 removeWornItem 해도 다음 동기화에서 되살아난다(11-06 실측). 서버는 인벤토리 아이템
 --   지급·회수만 맡되, 착지 뒤 몇 초간 다시 생겼는지 스윕해서 지운다.
@@ -22,15 +24,12 @@ require "HaloDropConfig"
 require "HaloDropFlight"
 
 local CLOSE_AFTER_END_MS = 120000   -- 경로 끝 이후 착지 보고를 기다리는 시간
-local CHECK_INTERVAL_MS  = 1000     -- 파일럿 접속 확인 주기
 local STATUS_INTERVAL_MS = 5000     -- 상태 로그 주기
-local SPAWN_TIMEOUT_MS   = 30000    -- A 청크 로드·실외 칸 스폰을 기다리는 최대 시간
-local SPAWN_SEARCH_R     = 8        -- A 주변에서 실외 칸을 찾는 반경(칸)
+local SPAWN_SEARCH_R     = 8        -- 점프 지점 주변에서 실외 칸을 찾는 반경(칸)
 local CHUTE_SWEEP_MS     = { 1500, 4000, 8000 }   -- 착지 뒤 낙하산 재확인 시점
 
 local R = nil
 local _roundSeq = 0
-local _nextCheck = 0
 local _nextStatus = 0
 local _chuteSweeps = {}   -- [key] = { p = IsoPlayer, at = { ms... } }
 
@@ -90,8 +89,6 @@ local function flightArgs()
         speed = R.fl.speed, dur = R.fl.durMs,
         elapsed = nowMs() - R.startAt,
         members = aboardKeys(),
-        pilot = R.pilotKey,
-        vid = R.vid,
     }
 end
 
@@ -191,36 +188,32 @@ local function chuteSweepTick()
     end
 end
 
--- ── 수송기 차량 ───────────────────────────────────────────────────────────────
-local function planeRemove(reason)
-    if not R then return end
-    if R.vehicle then
-        local ok, err = pcall(function() R.vehicle:permanentlyRemove() end)
-        log("plane removed vid=" .. tostring(R.vid) .. " ok=" .. tostring(ok)
+-- ── 점프 수송기 ───────────────────────────────────────────────────────────────
+-- R.jumps[key] = { x, y, p, pending, deadline, tried, reason, vehicle, vid, spawnedAt }
+local function jumpPlaneRemove(key, reason)
+    local j = R and R.jumps[key]
+    if not j then return end
+    if j.vehicle then
+        local ok, err = pcall(function() j.vehicle:permanentlyRemove() end)
+        log("jump plane removed vid=" .. tostring(j.vid) .. " ok=" .. tostring(ok)
             .. (ok and "" or (" err=" .. tostring(err))) .. " (" .. tostring(reason) .. ")")
+        if j.p then toPlayer(j.p, "PlaneGone", { id = R.id, vid = j.vid }) end
+    elseif j.pending then
+        log("jump plane for " .. tostring(key) .. " cancelled while pending (" .. tostring(reason) .. ")")
     end
-    R.vehicle = nil
-    R.vid = nil
-    R.spawnPending = false
-    toClients("PlaneGone", { id = R.id })
+    R.jumps[key] = nil
 end
 
-local function setPilot(key)
-    R.pilotKey = key
-    local p = key and findPlayer(key) or nil
-    if R.vehicle and p then
-        local ok, err = pcall(function() R.vehicle:authorizationChanged(p) end)
-        if not ok then log("plane authorization FAILED key=" .. tostring(key) .. " err=" .. tostring(err)) end
-    end
-    toClients("Pilot", { id = R.id, pilot = key, vid = R.vid })
-    log("pilot -> " .. tostring(key))
+local function jumpPlanesRemoveAll(reason)
+    if not R then return end
+    for key, _ in pairs(R.jumps) do jumpPlaneRemove(key, reason) end
 end
 
--- A 주변에서 차량을 놓을 수 있는 실외 칸을 찾는다. 청크가 안 올라와 있으면 nil.
+-- (cx, cy) 주변에서 차량을 놓을 수 있는 실외 칸을 찾는다. 청크가 안 올라와 있으면 nil.
 -- tried[x..","..y] 는 이미 실패한 칸.
 local function findSpawnSquare(cx, cy, tried)
     local center = getSquare(cx, cy, 0)
-    if not center then return nil, "A square not loaded" end
+    if not center then return nil, "square not loaded" end
     for r = 0, SPAWN_SEARCH_R do
         for dy = -r, r do
             for dx = -r, r do
@@ -239,56 +232,49 @@ local function findSpawnSquare(cx, cy, tried)
     return nil, "no outside square within r=" .. SPAWN_SEARCH_R
 end
 
--- 매 틱: A 청크가 로드되면 실외 칸에 스폰. id 가 -1 이면(월드에 안 들어감) 그 칸을 제외하고 재시도.
-local function planeTrySpawn()
-    if not R or R.ended or not R.spawnPending then return end
+-- 매 틱: 점프 지점 청크가 로드되면 실외 칸에 스폰해 그 플레이어에게 권한을 넘긴다.
+-- id 가 -1 이면(월드에 안 들어감) 그 칸을 제외하고 재시도. 수명이 지나면 지운다.
+local function jumpPlanesTick()
+    if not R then return end
     local now = nowMs()
-    if now > R.spawnDeadline then
-        R.spawnPending = false
-        log("plane spawn FAILED: timeout (" .. tostring(R.spawnReason) .. "), flight continues without the vehicle")
-        return
-    end
-    local cx, cy = math.floor(R.fl.ax), math.floor(R.fl.ay)
-    local sq, why = findSpawnSquare(cx, cy, R.spawnTried)
-    if not sq then
-        R.spawnReason = why
-        return
-    end
-    local ok, v = pcall(function() return addVehicleDebug(HaloDrop.PLANE_SCRIPT, IsoDirections.N, 0, sq) end)
-    if not ok or not v then
-        R.spawnPending = false
-        log("plane spawn FAILED err=" .. tostring(v))
-        return
-    end
-    local id = -1
-    pcall(function() id = v:getId() end)
-    if not id or id < 0 then
-        -- doSpawnedVehiclesInInvalidPosition 이 거부한 것. 이 칸은 제외하고 다음 틱에 다른 칸.
-        R.spawnTried[sq:getX() .. "," .. sq:getY()] = true
-        R.spawnReason = "rejected at (" .. tostring(sq:getX()) .. "," .. tostring(sq:getY()) .. ") outside=" .. tostring(sq:isOutside())
-        log("plane spawn rejected at (" .. tostring(sq:getX()) .. "," .. tostring(sq:getY()) .. ") id=-1, retrying another square")
-        pcall(function() v:permanentlyRemove() end)
-        return
-    end
-    R.vehicle = v
-    R.vid = id
-    R.spawnPending = false
-    log(string.format("plane spawned vid=%d at (%d,%d) after %dms", id, sq:getX(), sq:getY(), now - (R.startAt - HaloDrop.PREP_MS)))
-    local p = R.pilotKey and findPlayer(R.pilotKey) or nil
-    if p then
-        local okA, err = pcall(function() R.vehicle:authorizationChanged(p) end)
-        if not okA then log("plane authorization FAILED err=" .. tostring(err)) end
-    end
-    toClients("Pilot", { id = R.id, pilot = R.pilotKey, vid = R.vid })
-end
-
--- 파일럿이 내리면 아직 탑승 중인 사람에게 넘긴다. 없으면 마지막 파일럿이 계속 몬다
--- (차량이 그 클라 범위를 벗어나면 그 클라에선 사라지고, 경로 끝에서 서버가 지운다).
-local function pilotHandoff()
-    for k, m in pairs(R.members) do
-        if m.aboard and k ~= R.pilotKey and findPlayer(k) then
-            setPilot(k)
-            return
+    for key, j in pairs(R.jumps) do
+        if j.pending then
+            if now > j.deadline then
+                j.pending = false
+                log("jump plane spawn FAILED for " .. tostring(key) .. ": timeout (" .. tostring(j.reason) .. ")")
+                R.jumps[key] = nil
+            else
+                local sq, why = findSpawnSquare(j.x, j.y, j.tried)
+                if not sq then
+                    j.reason = why
+                else
+                    local ok, v = pcall(function() return addVehicleDebug(HaloDrop.PLANE_SCRIPT, IsoDirections.N, 0, sq) end)
+                    if not ok or not v then
+                        j.pending = false
+                        log("jump plane spawn FAILED for " .. tostring(key) .. " err=" .. tostring(v))
+                        R.jumps[key] = nil
+                    else
+                        local id = -1
+                        pcall(function() id = v:getId() end)
+                        if not id or id < 0 then
+                            j.tried[sq:getX() .. "," .. sq:getY()] = true
+                            j.reason = "rejected at (" .. tostring(sq:getX()) .. "," .. tostring(sq:getY()) .. ")"
+                            log("jump plane spawn rejected at (" .. tostring(sq:getX()) .. "," .. tostring(sq:getY()) .. ") id=-1, retrying another square")
+                            pcall(function() v:permanentlyRemove() end)
+                        else
+                            j.vehicle, j.vid, j.pending, j.spawnedAt = v, id, false, now
+                            log(string.format("jump plane spawned vid=%d at (%d,%d) for %s after %dms", id, sq:getX(), sq:getY(), tostring(key), now - j.askedAt))
+                            if j.p then
+                                local okA, err = pcall(function() v:authorizationChanged(j.p) end)
+                                if not okA then log("jump plane authorization FAILED err=" .. tostring(err)) end
+                                toPlayer(j.p, "JumpPlane", { id = R.id, vid = id, x = j.x, y = j.y })
+                            end
+                        end
+                    end
+                end
+            end
+        elseif j.vehicle and now - j.spawnedAt > HaloDrop.JUMP_PLANE_MAX_MS + 5000 then
+            jumpPlaneRemove(key, "lifetime")
         end
     end
 end
@@ -378,11 +364,8 @@ local function startRound(starter)
         fl = fl,
         startAt = nowMs() + HaloDrop.PREP_MS,
         members = {},
+        jumps = {},
         ended = false,
-        spawnPending = true,
-        spawnDeadline = nowMs() + SPAWN_TIMEOUT_MS,
-        spawnTried = {},
-        spawnReason = "waiting",
     }
     local n = 0
     local outside = {}
@@ -405,23 +388,7 @@ local function startRound(starter)
     log(string.format("round %d start by %s: box (%d,%d)-(%d,%d) A=(%.0f,%.0f) B=(%.0f,%.0f) len=%.0f speed=%.1f dur=%dms members=%d",
         R.id, tostring(starter:getUsername()), box.x1, box.y1, box.x2, box.y2,
         R.fl.ax, R.fl.ay, R.fl.bx, R.fl.by, R.fl.length, speed, R.fl.durMs, n))
-    -- 파일럿은 탑승자 중에서. 발동한 사람이 구역 밖이면 차량이 그 클라 범위에 없어 못 몬다
-    local pilot = nil
-    if R.members[HaloDrop.playerKey(starter)] then
-        pilot = starter
-    else
-        for k, _ in pairs(R.members) do
-            pilot = findPlayer(k)
-            if pilot then break end
-        end
-    end
-    if pilot then
-        R.pilotKey = HaloDrop.playerKey(pilot)
-        if pilot ~= starter then log("pilot = " .. tostring(pilot:getUsername()) .. " (starter outside zone)") end
-    else
-        log("round " .. tostring(R.id) .. " has no pilot (no members)")
-    end
-    -- 수송기는 탑승자가 A 로 옮겨져 A 청크가 서버에 올라온 뒤 onTick 에서 스폰한다 (planeTrySpawn)
+    -- 수송기 차량은 각자 점프하는 순간 그 자리에 띄운다 (jumpPlanesTick)
     toClients("Flight", flightArgs())
 end
 
@@ -430,8 +397,7 @@ local function endRound(reason)
     R.ended = true
     R.closeAt = nowMs() + CLOSE_AFTER_END_MS
     log("round " .. tostring(R.id) .. " end (" .. tostring(reason) .. ")")
-    toClients("End", { id = R.id })   -- 아직 탑승 중인 클라는 강제로 뛰어내린다
-    planeRemove(reason)
+    toClients("End", { id = R.id })   -- 아직 탑승 중인 클라는 강제로 뛰어내린다 (각자 JUMPING -> 점프 수송기 요청)
 end
 
 local function closeRound(reason)
@@ -440,6 +406,7 @@ local function closeRound(reason)
         local p = findPlayer(k)
         if p then chuteTake(p, "round close") end
     end
+    jumpPlanesRemoveAll("round close")
     log("round " .. tostring(R.id) .. " closed (" .. tostring(reason) .. ")")
     toClients("Closed", { id = R.id })
     R = nil
@@ -456,7 +423,7 @@ local function onTick()
     chuteSweepTick()
     if not R then return end
     local now = nowMs()
-    planeTrySpawn()
+    jumpPlanesTick()
     if not R.ended and now - R.startAt > R.fl.durMs then
         endRound("path end")
     end
@@ -470,18 +437,12 @@ local function onTick()
         for k, m in pairs(R.members) do
             parts[#parts + 1] = tostring(m.name) .. "=" .. (m.landed and "landed" or (m.aboard and "aboard" or "air"))
         end
-        log(string.format("status round=%d frac=%.3f ended=%s vid=%s spawn=%s pilot=%s members[%s]",
-            R.id, (now - R.startAt) / R.fl.durMs, tostring(R.ended), tostring(R.vid),
-            R.spawnPending and ("pending:" .. tostring(R.spawnReason)) or "done",
-            tostring(R.pilotKey), table.concat(parts, " ")))
-    end
-    if now >= _nextCheck then
-        _nextCheck = now + CHECK_INTERVAL_MS
-        -- 파일럿이 나갔으면 다른 탑승자에게 넘긴다
-        if not R.ended and R.pilotKey and not findPlayer(R.pilotKey) then
-            log("pilot " .. tostring(R.pilotKey) .. " gone")
-            pilotHandoff()
+        local jp = {}
+        for k, j in pairs(R.jumps) do
+            jp[#jp + 1] = tostring(k) .. "=" .. (j.pending and ("pending:" .. tostring(j.reason)) or ("vid" .. tostring(j.vid)))
         end
+        log(string.format("status round=%d frac=%.3f ended=%s members[%s] jumps[%s]",
+            R.id, (now - R.startAt) / R.fl.durMs, tostring(R.ended), table.concat(parts, " "), table.concat(jp, " ")))
     end
 end
 Events.OnTick.Add(onTick)
@@ -515,10 +476,17 @@ local function onClientCommand(module, command, player, args)
         local m = R.members[key]
         if not m or not m.aboard then return end
         m.aboard = false
-        log(string.format("jump %s (%s) at frac=%.2f pos=(%.0f,%.0f)",
-            tostring(m.name), tostring(args.reason), (nowMs() - R.startAt) / R.fl.durMs, player:getX(), player:getY()))
+        local jx, jy = math.floor(args.x or player:getX()), math.floor(args.y or player:getY())
+        log(string.format("jump %s (%s) at frac=%.2f route=(%d,%d) player=(%.0f,%.0f)",
+            tostring(m.name), tostring(args.reason), (nowMs() - R.startAt) / R.fl.durMs, jx, jy, player:getX(), player:getY()))
         toClients("Member", { id = R.id, key = key, aboard = false })
-        if R.pilotKey == key then pilotHandoff() end
+        -- 점프 수송기: 그 칸 청크가 서버에 올라오면 띄운다 (jumpPlanesTick)
+        jumpPlaneRemove(key, "re-jump")
+        R.jumps[key] = { x = jx, y = jy, p = player, pending = true, askedAt = nowMs(),
+            deadline = nowMs() + HaloDrop.opt("JumpWaitMax") * 1000, tried = {}, reason = "waiting for chunk" }
+    elseif command == "PlaneDone" then
+        if not R or args.id ~= R.id then return end
+        jumpPlaneRemove(key, "client done")
     elseif command == "ChuteOpen" then
         if not R or args.id ~= R.id then return end
         log("chute open " .. tostring(player:getUsername()) .. " (" .. tostring(args.reason) .. ") alt=" .. tostring(args.alt))
@@ -526,6 +494,7 @@ local function onClientCommand(module, command, player, args)
     elseif command == "Landed" then
         log(string.format("landed %s at (%.0f,%.0f,%.1f) chute=%s",
             tostring(player:getUsername()), player:getX(), player:getY(), player:getZ(), tostring(args.chute)))
+        if R and args.id == R.id then jumpPlaneRemove(key, "landed") end
         chuteTake(player, "landed")
         chuteScheduleSweeps(player)
         if R and args.id == R.id and R.members[key] then
@@ -543,11 +512,13 @@ local function onCharacterDeath(chr)
     if not instanceof(chr, "IsoPlayer") then return end
     chuteTake(chr, "death")
     if R then
-        local m = R.members[HaloDrop.playerKey(chr)]
+        local k = HaloDrop.playerKey(chr)
+        local m = R.members[k]
         if m then
             m.aboard = false
             m.landed = true
         end
+        jumpPlaneRemove(k, "death")
     end
 end
 Events.OnCharacterDeath.Add(onCharacterDeath)

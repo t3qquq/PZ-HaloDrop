@@ -45,5 +45,11 @@
   "Sandbox_HaloDrop_ZoneX2": "Boarding zone X2 (east)",
   "Sandbox_HaloDrop_ZoneX2_tooltip": "East edge of the boarding zone, in world tile coordinates (inclusive).",
   "Sandbox_HaloDrop_ZoneY2": "Boarding zone Y2 (south)",
-  "Sandbox_HaloDrop_ZoneY2_tooltip": "South edge of the boarding zone, in world tile coordinates (inclusive). Floor (height) is not checked."
+  "Sandbox_HaloDrop_ZoneY2_tooltip": "South edge of the boarding zone, in world tile coordinates (inclusive). Floor (height) is not checked.",
+  "Sandbox_HaloDrop_SkyView": "Sky view while aboard",
+  "Sandbox_HaloDrop_SkyView_tooltip": "While aboard the plane the world is not drawn; the map with the plane is shown instead (the client cannot stream land fast enough at flight speed).",
+  "Sandbox_HaloDrop_SkyZoom": "Sky view map zoom",
+  "Sandbox_HaloDrop_SkyZoom_tooltip": "World map zoom level used by the sky view (higher = closer).",
+  "Sandbox_HaloDrop_JumpWaitMax": "Jump: max wait for land (s)",
+  "Sandbox_HaloDrop_JumpWaitMax_tooltip": "After pressing jump, how long to wait (under the clouds) for the land below and the plane to load before falling anyway."
 }

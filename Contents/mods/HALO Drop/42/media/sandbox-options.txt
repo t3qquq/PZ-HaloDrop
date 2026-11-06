@@ -114,3 +114,18 @@ option HaloDrop.ZoneY2 = {
     type = integer, min = 0, max = 100000, default = 292,
     page = HaloDrop, translation = HaloDrop_ZoneY2,
 }
+
+option HaloDrop.SkyView = {
+    type = boolean, default = true,
+    page = HaloDrop, translation = HaloDrop_SkyView,
+}
+
+option HaloDrop.SkyZoom = {
+    type = double, min = 6.0, max = 24.0, default = 14.0,
+    page = HaloDrop, translation = HaloDrop_SkyZoom,
+}
+
+option HaloDrop.JumpWaitMax = {
+    type = integer, min = 5, max = 180, default = 45,
+    page = HaloDrop, translation = HaloDrop_JumpWaitMax,
+}

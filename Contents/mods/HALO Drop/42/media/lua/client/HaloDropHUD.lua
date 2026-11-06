@@ -19,6 +19,11 @@ local function lineFor(J)
             end
         end
         return getText("IGUI_HaloDrop_Aboard", keyName())
+    elseif J.state == "JUMPING" then
+        local C = HaloDrop.C
+        if C.jump then return getText("IGUI_HaloDrop_JumpingPlane") end
+        local waited = J.jump and (getTimestampMs() - J.jump.at) or 0
+        return getText("IGUI_HaloDrop_Jumping", tostring(math.floor(waited / 1000)))
     elseif J.state == "FREEFALL" then
         return getText("IGUI_HaloDrop_Freefall", tostring(math.floor(J.alt)), keyName())
     elseif J.state == "CANOPY" then

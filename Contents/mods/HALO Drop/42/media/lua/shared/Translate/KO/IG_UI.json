@@ -3,5 +3,7 @@
   "IGUI_HaloDrop_Aboard": "[%1] 뛰어내리기",
   "IGUI_HaloDrop_Freefall": "자유낙하  %1 m   [%2] 낙하산 펼치기",
   "IGUI_HaloDrop_Canopy": "낙하산 강하  %1 m",
-  "IGUI_HaloDrop_Hint": "W 활공   W+%1 다이브   S 감속   A/D 선회"
+  "IGUI_HaloDrop_Hint": "W 활공   W+%1 다이브   S 감속   A/D 선회",
+  "IGUI_HaloDrop_Jumping": "강하 준비  발밑 지형 대기 중  %1초",
+  "IGUI_HaloDrop_JumpingPlane": "강하 준비  수송기 접근 중"
 }

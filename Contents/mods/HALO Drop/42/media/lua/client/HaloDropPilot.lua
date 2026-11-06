@@ -1,28 +1,35 @@
--- Halo Drop 파일럿 클라: 수송기 차량을 경로 위치로 옮긴다
+-- Halo Drop 파일럿 클라: 점프 순간의 수송기 차량을 머리 위로 지나가게 끈다
 --
--- 퐁듀 수송기(zombierain.lua planePilotTick)와 같은 방식이다.
---   서버가 이 클라에 물리 권한을 넘기고(authorizationChanged), 이 클라가 매 틱 setWorldTransform.
---   클라 setWorldTransform 은 내부에서 Bullet.teleportVehicle 을 부른다(BaseVehicle).
---   B42 는 private tempTransform 리플렉션이 막혀 있어 노출된 zombie.core.physics.Transform 을 쓴다.
--- 높이는 PlaneZ(기본 15층, 퐁듀 수송기와 같음). 탑승자가 머무는 CarryZ 와 분리돼 있다 --
--- 캐릭터 층은 카메라·청크 제약으로 10 근처가 한계지만 차량은 그 제약이 없다. 탑승자는 숨겨지므로
--- 둘의 높이가 달라도 보이지 않는다.
+-- 설계 B (11-06): 비행 구간엔 월드 차량이 없다(클라 청크 스트리밍이 48 타일/초를 못 따라와 차량이 사라짐,
+--   claude/HaloDrop_설계.md 2절). E 를 누르면 서버가 점프 지점 근처에 차량을 띄우고 이 클라에 물리 권한을
+--   넘긴다(JumpPlane). 이 클라는 그 차량을 점프 지점 뒤 JUMP_PLANE_BEHIND 에서 앞 JUMP_PLANE_AHEAD 까지
+--   PlaneSpeed 로 끌고 지나간 뒤 PlaneDone 을 보낸다. 점프 지점을 지나는 순간 HaloDropJumper.onPlanePassed().
+-- 이동: setWorldTransform (내부 Bullet.teleportVehicle). 목적지 칸이 이 클라에 안 올라와 있으면 그 틱은
+--   옮기지 않는다 -- 옮겨 봐야 BaseVehicle.update 가 이전 청크 안으로 되돌린다(b42.21 :3430~3450).
+-- 높이 PlaneZ(층) x PHYS_PER_FLOOR.
 
 if isServer() then return end
 
 require "HaloDropConfig"
 require "HaloDropFlight"
 
+HaloDropPilot = {}
+
 local _tr = nil
 local _logged = {}
-local _nextLog = nil
--- 차량 보유 상태 (라운드마다 초기화). lost/skipped 는 주기 로그에 함께 찍는다.
-local _st = { id = nil, have = false, lost = 0, skipped = 0, moved = 0 }
+local _run = nil   -- 현재 끌고 있는 수송기 { vid, x0, y0, dx, dy, assignedMs, startMs(차량 확보 시각), passed, moved, skipped, lostAt }
+
+local function log(msg) HaloDrop.log(msg) end
 
 local function logOnce(tag, msg)
     if _logged[tag] then return end
     _logged[tag] = true
-    HaloDrop.log(msg)
+    log(msg)
+end
+
+local function send(cmd, args)
+    local p = getPlayer()
+    if p then sendClientCommand(p, HaloDrop.MODULE, cmd, args) end
 end
 
 local function findPlane(vid)
@@ -34,54 +41,79 @@ local function findPlane(vid)
     return nil
 end
 
-local function pilotTick()
+local function finishRun(why)
+    if not _run then return end
+    log(string.format("jump plane done (%s) vid=%s moved=%d skipped=%d passed=%s after %dms",
+        why, tostring(_run.vid), _run.moved, _run.skipped, tostring(_run.passed), getTimestampMs() - _run.assignedMs))
+    send("PlaneDone", { id = HaloDrop.C.id, vid = _run.vid })
+    _run = nil
+    HaloDrop.C.jump = nil
+end
+
+-- 서버 JumpPlane 수신 (HaloDropClient): 점프 지점 (x, y) 와 차량 id
+function HaloDropPilot.onJumpPlane(args)
     local C = HaloDrop.C
-    if not C.fl or C.ended or not C.vid then return end
-    local me = getPlayer()
-    if not me or C.pilotKey ~= HaloDrop.playerKey(me) then return end
-    if _st.id ~= C.id then
-        _st.id, _st.have, _st.lost, _st.skipped, _st.moved = C.id, false, 0, 0, 0
+    if not C.fl then return end
+    local dx, dy = HaloDropFlight.dir(C.fl)
+    _run = {
+        vid = args.vid, x0 = args.x, y0 = args.y, dx = dx, dy = dy,
+        assignedMs = getTimestampMs(), startMs = nil, passed = false, moved = 0, skipped = 0, lostAt = nil,
+    }
+    _logged = {}
+    log(string.format("jump plane assigned vid=%s at (%d,%d) dir=(%.2f,%.2f)", tostring(args.vid), args.x, args.y, dx, dy))
+end
+
+local function pilotTick()
+    if not _run then return end
+    local C = HaloDrop.C
+    if not C.fl or not C.jump then
+        finishRun("flight/jump cleared")
+        return
     end
-    local v = findPlane(C.vid)
     local now = getTimestampMs()
-    local frac = HaloDropFlight.frac(C.fl, now - C.t0)
+    if now - _run.assignedMs > HaloDrop.JUMP_PLANE_MAX_MS then
+        finishRun("timeout")
+        return
+    end
+    local v = findPlane(_run.vid)
     if not v then
-        if _st.have then
-            -- 11-06 런 3 실측: 첫 틱 뒤 매번 사라짐. 클라 차량은 자기 청크가 언로드되면
-            -- IsoChunk.removeFromWorld -> VehicleManager 에서 빠진다 (b42.21 BaseVehicle:8182).
-            _st.have = false
-            _st.lost = _st.lost + 1
-            HaloDrop.log(string.format("pilot: plane vehicle LOST vid=%s frac=%.3f (lost=%d, client chunk unloaded?)",
-                tostring(C.vid), frac, _st.lost))
+        if _run.startMs then
+            if not _run.lostAt then
+                _run.lostAt = now
+                log("jump plane LOST vid=" .. tostring(_run.vid) .. " (client chunk unloaded?)")
+            end
         else
-            logOnce("novehicle" .. tostring(C.id), "pilot: plane vehicle not found yet vid=" .. tostring(C.vid))
+            logOnce("novehicle", "jump plane not found yet vid=" .. tostring(_run.vid))
         end
         return
     end
-    if not _st.have then
-        _st.have = true
-        HaloDrop.log(string.format("pilot: plane vehicle %s vid=%s frac=%.3f at (%.1f,%.1f)",
-            _st.lost > 0 and "RE-ACQUIRED" or "acquired", tostring(C.vid), frac, v:getX(), v:getY()))
+    if not _run.startMs then
+        -- 차량이 이 클라에 보이기 시작한 순간부터 시계를 돈다 (그 전엔 어차피 못 옮긴다)
+        _run.startMs = now
+        log(string.format("jump plane acquired vid=%s at (%.1f,%.1f) %dms after assign", tostring(_run.vid), v:getX(), v:getY(), now - _run.assignedMs))
     end
-    local x, y = HaloDropFlight.pos(C.fl, now - C.t0)
-    -- 목적지 칸이 이 클라에 안 올라와 있으면 옮기지 않는다. 옮겨 봐야 BaseVehicle.update 가
-    -- (sq==null && chunk.refs 비어있지 않음) 분기에서 이전 청크 안으로 되돌려 놓는다 (b42.21 :3430~3450).
+    _run.lostAt = nil
+    local t = (now - _run.startMs) / 1000
+    local speed = C.fl.speed
+    -- 뒤 BEHIND 에서 출발해 PlaneSpeed 로 전진. 점프 지점 통과 시각 = BEHIND / speed
+    local s = -HaloDrop.JUMP_PLANE_BEHIND + speed * t
+    local x, y = _run.x0 + _run.dx * s, _run.y0 + _run.dy * s
+    if s >= 0 and not _run.passed then
+        _run.passed = true
+        log(string.format("jump plane passed over (%d,%d) at t=%.2fs", _run.x0, _run.y0, t))
+        if HaloDropJumper and HaloDropJumper.onPlanePassed then HaloDropJumper.onPlanePassed() end
+    end
+    if s > HaloDrop.JUMP_PLANE_AHEAD then
+        finishRun("passed ahead")
+        return
+    end
     local tsq = getCell():getGridSquare(math.floor(x), math.floor(y), 0)
-    if not tsq then
-        _st.skipped = _st.skipped + 1
-    else
-        _st.moved = _st.moved + 1
-    end
-    if not _nextLog or now >= _nextLog then
-        _nextLog = now + 2000
-        HaloDrop.log(string.format("pilot tick frac=%.3f target=(%.1f,%.1f) vehicle=(%.1f,%.1f,%.2f) targetLoaded=%s moved=%d skipped=%d lost=%d",
-            frac, x, y, v:getX(), v:getY(), v:getZ(), tostring(tsq ~= nil), _st.moved, _st.skipped, _st.lost))
-    end
-    -- 기수 방향은 매 틱 다시 건다 (setAngles 는 정수 각도가 같으면 아무것도 안 한다).
-    -- 한 번만 걸면 권한 이전 전 서버 갱신이 스폰 방향으로 되돌릴 수 있다(퐁듀 2026-10-27).
     local okY, errY = pcall(function() v:setAngles(0, HaloDropFlight.yaw(C.fl), 0) end)
-    if not okY then logOnce("yaw" .. tostring(C.id), "pilot: setAngles FAILED err=" .. tostring(errY)) end
-    if not tsq then return end
+    if not okY then logOnce("yaw", "jump plane setAngles FAILED err=" .. tostring(errY)) end
+    if not tsq then
+        _run.skipped = _run.skipped + 1
+        return
+    end
     local ok, err = pcall(function()
         if not _tr then _tr = Transform.new() end
         local tr = v:getWorldTransform(_tr)
@@ -89,6 +121,11 @@ local function pilotTick()
         o:set(o:x() + (x - v:getX()), HaloDrop.opt("PlaneZ") * HaloDrop.PHYS_PER_FLOOR, o:z() + (y - v:getY()))
         v:setWorldTransform(tr)
     end)
-    if not ok then logOnce("move" .. tostring(C.id), "pilot: plane move FAILED err=" .. tostring(err)) end
+    if ok then _run.moved = _run.moved + 1
+    else logOnce("move", "jump plane move FAILED err=" .. tostring(err)) end
 end
 Events.OnTick.Add(pilotTick)
+
+function HaloDropPilot.cancel(why)
+    if _run then finishRun(why) end
+end

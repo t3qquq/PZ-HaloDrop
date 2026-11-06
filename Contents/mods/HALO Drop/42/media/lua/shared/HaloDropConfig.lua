@@ -17,6 +17,10 @@ HaloDrop.CHUTE_ITEM   = "HaloDrop.HaloDropParachute"
 HaloDrop.M_PER_FLOOR  = 2.45                 -- 가상 고도(m) <-> 층. 엔진 카메라 환산 2.44949
 HaloDrop.PHYS_PER_FLOOR = 2.46               -- 차량 물리 y <-> 층. 퐁듀 수송기(PLANE_FLY_ALT)와 같은 값
 HaloDrop.PREP_MS      = 5000                 -- 라운드 시작 방송 후 수송기가 A 를 떠나기까지
+HaloDrop.JUMP_PLANE_GRACE_MS = 8000          -- 점프: 발밑 땅이 올라온 뒤 수송기 없이 기다리는 최대 시간
+HaloDrop.JUMP_PLANE_BEHIND   = 40            -- 점프 수송기 시작 위치: 점프 지점 뒤쪽(타일). 클라 로드 창(±52칸) 안
+HaloDrop.JUMP_PLANE_AHEAD    = 60            -- 점프 수송기 끝 위치: 점프 지점 앞쪽(타일). 지나면 제거
+HaloDrop.JUMP_PLANE_MAX_MS   = 20000         -- 점프 수송기 최대 수명(서버). 클라 PlaneDone 이 안 와도 지운다
 
 -- 착지 감속. 퐁듀 zombierain.lua 의 LAND_SPEED / FREE_FALL_BRAKE_H 와 같은 값.
 -- 착지 피해 기준은 충돌 속도 약 2.24 층/초(FallingConstants). updateFalling 이 착지 틱에
@@ -41,6 +45,17 @@ HaloDrop.CP = {
     glide   = { v = 1.19, h = 1.00 },   -- W: 전진
     dive    = { v = 1.50, h = 0.60 },   -- W + 달리기 키: 빠른 하강 (배그 Shift)
     brake   = { v = 0.85, h = 0.30 },   -- S: 플레어 (수치는 배그 자료 없음, 임의)
+}
+
+-- ── 하늘 뷰 (HaloDropSky.lua) 상수. 지도 줌은 샌드박스 SkyZoom. ─────────────────────
+HaloDrop.SKY = {
+    LEAD       = 90,     -- 지도 중심을 진행 방향으로 당기는 거리(타일). 기체 앞쪽이 더 보이게
+    SCENE_FRAC = 0.42,   -- 기체 씬 한 변 = 화면 짧은 변 x 이 값
+    SCENE_DY   = 0.0,    -- 기체 씬 세로 위치 보정(화면 높이 비율, + 는 아래)
+    SCENE_ZOOM = 8,      -- ISUI3DScene setZoom (1~20)
+    TILT       = 30,     -- 기체를 내려다보는 각도(도). Wingsmith VIEW_TILT 와 같은 출발값
+    YAW0       = 45,     -- 기수 방향 보정(도). 런에서 맞춘다
+    COVER_RATE = 2.0,    -- 구름 덮개 알파가 목표로 수렴하는 속도(1/초)
 }
 
 function HaloDrop.log(msg)
