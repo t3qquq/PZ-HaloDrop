@@ -8,16 +8,23 @@ require "HaloDropConfig"
 
 HaloDropFlight = {}
 
+-- A(ax, ay) -> B(bx, by), speed 타일/초.
+function HaloDropFlight.makeAB(ax, ay, bx, by, speed)
+    local dx, dy = bx - ax, by - ay
+    local length = math.sqrt(dx * dx + dy * dy)
+    if length < 1 then length = 1 end
+    return {
+        ax = ax, ay = ay, bx = bx, by = by,
+        speed = speed,
+        length = length,
+        durMs = math.floor(length / speed * 1000),
+    }
+end
+
 -- A(ax, ay) 에서 angleDeg 방향으로 length 타일, speed 타일/초.
 function HaloDropFlight.make(ax, ay, angleDeg, length, speed)
     local r = math.rad(angleDeg)
-    return {
-        ax = ax, ay = ay,
-        bx = ax + math.cos(r) * length,
-        by = ay + math.sin(r) * length,
-        speed = speed,
-        durMs = math.floor(length / speed * 1000),
-    }
+    return HaloDropFlight.makeAB(ax, ay, ax + math.cos(r) * length, ay + math.sin(r) * length, speed)
 end
 
 -- 진행률. 0 = A, 1 = B. 출발 전이면 음수.
@@ -43,4 +50,9 @@ function HaloDropFlight.dir(fl)
     local len = math.sqrt(dx * dx + dy * dy)
     if len <= 0 then return 1, 0 end
     return dx / len, dy / len
+end
+
+-- 진행 방향 각도(도). 월드 +x = 0, +y = 90 (math.atan2(dy, dx)). 강하 heading 초기값.
+function HaloDropFlight.headingDeg(fl)
+    return math.deg(math.atan2(fl.by - fl.ay, fl.bx - fl.ax))
 end

@@ -1,13 +1,28 @@
 VERSION = 1,
 
 option HaloDrop.PlaneSpeed = {
-    type = double, min = 5.0, max = 19.0, default = 16.0,
+    type = double, min = 5.0, max = 80.0, default = 48.0,
     page = HaloDrop, translation = HaloDrop_PlaneSpeed,
 }
 
-option HaloDrop.PathLength = {
-    type = integer, min = 300, max = 6000, default = 1500,
-    page = HaloDrop, translation = HaloDrop_PathLength,
+option HaloDrop.WorldX1 = {
+    type = integer, min = 0, max = 100000, default = 1500,
+    page = HaloDrop, translation = HaloDrop_WorldX1,
+}
+
+option HaloDrop.WorldY1 = {
+    type = integer, min = 0, max = 100000, default = 800,
+    page = HaloDrop, translation = HaloDrop_WorldY1,
+}
+
+option HaloDrop.WorldX2 = {
+    type = integer, min = 0, max = 100000, default = 15000,
+    page = HaloDrop, translation = HaloDrop_WorldX2,
+}
+
+option HaloDrop.WorldY2 = {
+    type = integer, min = 0, max = 100000, default = 13500,
+    page = HaloDrop, translation = HaloDrop_WorldY2,
 }
 
 option HaloDrop.PlaneZ = {
@@ -36,13 +51,38 @@ option HaloDrop.CanopySpeed = {
 }
 
 option HaloDrop.FreefallSteer = {
-    type = double, min = 0.0, max = 19.0, default = 12.0,
+    type = double, min = 0.0, max = 60.0, default = 12.0,
     page = HaloDrop, translation = HaloDrop_FreefallSteer,
 }
 
 option HaloDrop.CanopySteer = {
-    type = double, min = 0.0, max = 19.0, default = 8.0,
+    type = double, min = 0.0, max = 60.0, default = 8.0,
     page = HaloDrop, translation = HaloDrop_CanopySteer,
+}
+
+option HaloDrop.FreefallTurnRate = {
+    type = double, min = 10.0, max = 720.0, default = 120.0,
+    page = HaloDrop, translation = HaloDrop_FreefallTurnRate,
+}
+
+option HaloDrop.CanopyTurnRate = {
+    type = double, min = 10.0, max = 720.0, default = 70.0,
+    page = HaloDrop, translation = HaloDrop_CanopyTurnRate,
+}
+
+option HaloDrop.PitchRate = {
+    type = double, min = 0.2, max = 20.0, default = 2.0,
+    page = HaloDrop, translation = HaloDrop_PitchRate,
+}
+
+option HaloDrop.FreefallAccel = {
+    type = double, min = 0.1, max = 20.0, default = 1.5,
+    page = HaloDrop, translation = HaloDrop_FreefallAccel,
+}
+
+option HaloDrop.CanopyAccel = {
+    type = double, min = 0.1, max = 20.0, default = 0.6,
+    page = HaloDrop, translation = HaloDrop_CanopyAccel,
 }
 
 option HaloDrop.AutoOpenAltitude = {

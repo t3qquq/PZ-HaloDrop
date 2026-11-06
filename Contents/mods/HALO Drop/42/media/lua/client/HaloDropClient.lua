@@ -63,6 +63,9 @@ local function hideTick()
     for k, p in pairs(_hidden) do
         if not shouldHide(k) then
             setHidden(p, false)
+            -- 컬링 해제만으로는 모델이 늦게 붙거나 안 붙는 경우가 있어(11-06 영상: 뛰어내린 뒤 줌에 따라 투명)
+            -- 모델을 다음 프레임에 다시 만들게 한다
+            pcall(function() p:resetModelNextFrame() end)
             _hidden[k] = nil
             log("unhide " .. tostring(k))
         end
@@ -107,6 +110,8 @@ function HaloDrop.onServerCommand(module, command, args)
         if amMember and HaloDropJumper then HaloDropJumper.board() end
     elseif command == "ChuteWear" then
         if HaloDropJumper then HaloDropJumper.onChuteWear() end
+    elseif command == "ChuteTake" then
+        if HaloDropJumper then HaloDropJumper.onChuteTake(args.reason) end
     elseif args.id ~= C.id then
         return
     elseif command == "Member" then

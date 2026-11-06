@@ -24,6 +24,25 @@ HaloDrop.PREP_MS      = 5000                 -- 라운드 시작 방송 후 수�
 HaloDrop.LAND_SPEED   = 1.2
 HaloDrop.BRAKE_H      = 1.0
 
+-- ── 강하 모델 (PUBG 실측 비율, claude/PUBG_강하_메커니즘_조사.md 3.1 / 5.1 절) ──────────
+-- 자유낙하: 수직은 FreefallSpeed(=풀다이브 234km/h 에 해당) 대비 비율, 수평은 FreefallSteer 대비 비율.
+--   풀다이브 234 / 무입력 180 / 활공·브레이크 126 km/h -> 1.00 / 0.77 / 0.54
+--   활공 수평 122 km/h 는 수평 상한(FreefallSteer)을 그대로 쓴다.
+HaloDrop.FF = {
+    neutral = { v = 0.77, h = 0.00 },   -- 무입력
+    glide   = { v = 0.54, h = 1.00 },   -- W: 앞으로 기울여 활공
+    dive    = { v = 1.00, h = 0.00 },   -- W + 달리기 키: 정면 아래 다이브
+    brake   = { v = 0.54, h = 0.00 },   -- S: 감속
+}
+-- 캐노피: 수직은 CanopySpeed(=무입력 54km/h) 대비 비율, 수평은 CanopySteer 대비 비율.
+--   무입력 54 / W 64 km/h 수직, W 47 km/h 수평 -> 1.00 / 1.19, 수평 1.00
+HaloDrop.CP = {
+    neutral = { v = 1.00, h = 0.00 },
+    glide   = { v = 1.19, h = 1.00 },   -- W: 전진
+    dive    = { v = 1.50, h = 0.60 },   -- W + 달리기 키: 빠른 하강 (배그 Shift)
+    brake   = { v = 0.85, h = 0.30 },   -- S: 플레어 (수치는 배그 자료 없음, 임의)
+}
+
 function HaloDrop.log(msg)
     print("[HaloDrop] " .. tostring(msg))
 end

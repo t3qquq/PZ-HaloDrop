@@ -2,5 +2,6 @@
   "IGUI_HaloDrop_Prep": "Plane departs in %1 s",
   "IGUI_HaloDrop_Aboard": "[%1] Jump",
   "IGUI_HaloDrop_Freefall": "Free fall  %1 m   [%2] Open parachute",
-  "IGUI_HaloDrop_Canopy": "Parachute  %1 m"
+  "IGUI_HaloDrop_Canopy": "Parachute  %1 m",
+  "IGUI_HaloDrop_Hint": "W glide   W+%1 dive   S brake   A/D turn"
 }

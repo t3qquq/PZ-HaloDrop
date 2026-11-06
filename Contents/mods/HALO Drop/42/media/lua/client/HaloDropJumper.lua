@@ -1,9 +1,9 @@
 -- Halo Drop 점퍼: 자기 캐릭터의 탑승·자유낙하·낙하산·착지
 --
 -- 상태: nil -> ABOARD -> FREEFALL -> CANOPY -> nil(착지)
---   ABOARD    수송기 경로 위치에 붙잡는다 (실제 z = CarryZ)
---   FREEFALL  가상 고도를 FreefallSpeed 로 줄인다. 상호작용 키로 낙하산
---   CANOPY    가상 고도를 CanopySpeed 로 줄인다
+--   ABOARD    수송기 경로 위치에 붙잡는다 (실제 z = CarryZ). Flight 수신 즉시 A 로 옮겨진다.
+--   FREEFALL  가상 고도를 수직 속도로 줄인다. 상호작용 키로 낙하산
+--   CANOPY    낙하산. 수직·수평 속도가 캐노피 목표치로 서서히 수렴한다
 -- 실제 z 처리 (HaloDropConfig.lua 고도 체계 참고)
 --   붙잡기(hold): 가상 고도가 CarryZ 층보다 높은 동안. 매 틱 x, y, z 를 직접 정하고 낙하 속도를 0 으로 둔다.
 --   놓기(release): 가상 고도가 CarryZ 층 아래로 내려오면 엔진 낙하(IsoGameCharacter.updateFalling)에
@@ -11,10 +11,20 @@
 --     updateFalling 은 중력을 더하는 등가속도이고 착지 피해는 충돌 순간 속도로만 정한다.
 -- 순서: IsoGameCharacter.update(updateFalling 포함)가 먼저 돌고 OnPlayerUpdate 가 뒤에 발화한다(IsoPlayer).
 --   그래서 여기서 정한 위치가 그 틱의 렌더 위치가 되고, 낙하 속도는 다음 틱 updateFalling 에 쓰인다.
--- 안티치트: 차량 밖 캐릭터는 1초 평균 20 타일/초를 넘으면 위반이다(AntiCheatSpeed).
---   수송기 속도·조향 속도 샌드박스 상한을 19 로 둔 이유.
+--
+-- 강하 모델 (claude/PUBG_강하_메커니즘_조사.md 9.2 절, 방식 A)
+--   heading(도): 몸이 향한 수평 방향. A/D 가 TurnRate(도/초)로 돌린다. 즉시 꺾이지 않는다.
+--   pitch(-1~+1): W 를 누르면 +1 로, S 를 누르면 -1 로 PitchRate 속도로 기운다. 떼면 0 으로 돌아온다.
+--   목표 속도: pitch 로 (무입력 <-> 활공/다이브/브레이크) 비율표(HaloDrop.FF / CP)를 보간한다.
+--     W = 활공(앞으로 기울임, 수평 속도 생김), W + 달리기 키 = 다이브(수직 최대, 수평 0), S = 브레이크.
+--   관성: v += (목표 - v) * min(1, Accel*dt). 낙하산을 펴도 속도를 리셋하지 않고 CanopyAccel 로 수렴시킨다
+--     (배그 슬링샷: 펴진 직후 몇 초간 자유낙하 속도를 이어받는다).
+--   수평 위치는 heading 방향 x 수평 속도로만 움직인다.
+-- 안티치트: 차량 밖 캐릭터는 1초 평균 20 타일/초를 넘으면 위반이다(AntiCheatSpeed). 이 검사는 서버 ini
+--   AntiCheatSpeed=4(Disabled) 로 끈 서버에서만 수송기 속도 20 초과·A 로의 순간 이동이 안전하다.
 -- 낙하산 착용·해제는 여기(클라)서 한다. 서버는 아이템 지급(ChuteWear 지시)·회수만 한다 -- 착용 상태는
 --   클라 setWornItem 이 SyncClothing 으로 서버에 올리므로 서버가 벗겨도 되살아난다(11-06 실측).
+--   착지 뒤 CHUTE_GUARD_MS 동안 매 틱 착용 목록을 감시해 다시 생기면 즉시 벗긴다.
 
 if isServer() then return end
 
@@ -25,6 +35,8 @@ HaloDropJumper = {}
 
 local J = { state = nil }
 HaloDrop.J = J
+
+local CHUTE_GUARD_MS = 10000   -- 착지 뒤 낙하산 재착용 감시 시간
 
 local function log(msg) HaloDrop.log(msg) end
 
@@ -55,15 +67,6 @@ local function findChute(p)
     return inv and inv:getFirstTypeRecurse(HaloDrop.CHUTE_ITEM) or nil
 end
 
-local function chuteWear(p)
-    local item = findChute(p)
-    if not item then return false end
-    if p:getWornItems():getLocation(item) then return true end
-    local ok, err = pcall(function() p:setWornItem(item:getBodyLocation(), item) end)
-    log("chute wear ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err))))
-    return ok
-end
-
 -- 착용 목록에 있는 낙하산 전부 (인벤토리에서 이미 지워졌는데 착용 목록에만 남은 경우도 잡는다)
 local function wornChutes(p)
     local out = {}
@@ -76,14 +79,26 @@ local function wornChutes(p)
     return out
 end
 
+local function chuteWear(p)
+    local item = findChute(p)
+    if not item then return false end
+    if p:getWornItems():getLocation(item) then return true end
+    local ok, err = pcall(function() p:setWornItem(item:getBodyLocation(), item) end)
+    log("chute wear ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err))) .. " id=" .. tostring(item:getID()))
+    -- 착용으로 모델이 다시 만들어진다 (낙하산 메시 로드 동안 캐릭터가 잠깐 안 보이는 건 엔진 쪽)
+    return ok
+end
+
 local function chuteUnwear(p, reason)
     local items = wornChutes(p)
-    if #items == 0 then return end
+    if #items == 0 then return 0 end
     for _, item in ipairs(items) do
         local ok, err = pcall(function() p:removeWornItem(item) end)
         log("chute unwear (" .. tostring(reason) .. ") ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err)))
-            .. " inInventory=" .. tostring(item:getContainer() ~= nil))
+            .. " id=" .. tostring(item:getID()) .. " inInventory=" .. tostring(item:getContainer() ~= nil))
     end
+    p:resetModelNextFrame()
+    return #items
 end
 
 -- 서버 ChuteWear 는 sendAddItemToContainer 보다 먼저 도착할 수 있다 -> 아이템이 보일 때까지 몇 틱 재시도
@@ -91,23 +106,60 @@ local _wearUntil = nil
 function HaloDropJumper.onChuteWear()
     local p = getPlayer()
     if not p then return end
+    if J.state ~= "CANOPY" then
+        log("ChuteWear ignored: state=" .. tostring(J.state))
+        return
+    end
     if chuteWear(p) then return end
     _wearUntil = getTimestampMs() + 3000
     log("chute item not in inventory yet -> retrying up to 3s")
 end
 
-local function wearRetryTick()
-    if not _wearUntil then return end
+-- 서버 스윕이 지웠다고 알리면 클라 쪽 착용 목록도 다시 확인한다
+function HaloDropJumper.onChuteTake(reason)
     local p = getPlayer()
     if not p then return end
-    if chuteWear(p) then
-        _wearUntil = nil
-    elseif getTimestampMs() > _wearUntil then
-        _wearUntil = nil
-        log("chute wear FAILED: item never arrived")
+    local n = chuteUnwear(p, "server " .. tostring(reason))
+    log("ChuteTake from server (" .. tostring(reason) .. ") unworn=" .. tostring(n))
+end
+
+-- 착지 뒤 감시: 다시 착용돼 있으면 벗긴다 (누가 되살렸는지 OnClothingUpdated 로그로 추적)
+local _guardUntil = nil
+local function chuteGuardTick()
+    local p = getPlayer()
+    if not p then return end
+    if _wearUntil then
+        if J.state ~= "CANOPY" then
+            _wearUntil = nil
+        elseif chuteWear(p) then
+            _wearUntil = nil
+        elseif getTimestampMs() > _wearUntil then
+            _wearUntil = nil
+            log("chute wear FAILED: item never arrived")
+        end
+    end
+    if _guardUntil then
+        if getTimestampMs() > _guardUntil then
+            _guardUntil = nil
+            log("chute guard ended, worn=" .. tostring(#wornChutes(p)) .. " inventory=" .. tostring(findChute(p) ~= nil))
+        else
+            local n = chuteUnwear(p, "guard")
+            if n > 0 then
+                log("chute guard: parachute came back and was removed again (n=" .. tostring(n) .. ")")
+                send(p, "Cleanup", {})
+            end
+        end
     end
 end
-Events.OnTick.Add(wearRetryTick)
+Events.OnTick.Add(chuteGuardTick)
+
+-- 착용 목록 동기화 패킷(SyncClothing)이 도착할 때마다 발화. 낙하산이 되살아나는 경로 추적용.
+local function onClothingUpdated(chr)
+    local p = getPlayer()
+    if chr ~= p or not _guardUntil then return end
+    log("OnClothingUpdated during guard: worn chutes=" .. tostring(#wornChutes(p)) .. " inventory=" .. tostring(findChute(p) ~= nil))
+end
+Events.OnClothingUpdated.Add(onClothingUpdated)
 
 -- ── 위치 제어 ─────────────────────────────────────────────────────────────────
 -- setForceX/Y = x, next, last 동시 설정 (IsoMovingObject). setZ 는 lastZ 도 같이 정하고 31 로 자른다.
@@ -118,19 +170,37 @@ local function hold(p, x, y, z)
     p:setLastFallSpeed(0)
 end
 
--- 이동 키 -> 월드 방향. 아이소 화면 위 = 월드 (-1,-1), 오른쪽 = (+1,-1).
-local SQ = 0.70710678
-local function steerDir()
-    local sx, sy = 0, 0
-    if isKeyDown("Forward") then sy = sy - 1 end
-    if isKeyDown("Backward") then sy = sy + 1 end
-    if isKeyDown("Left") then sx = sx - 1 end
-    if isKeyDown("Right") then sx = sx + 1 end
-    if sx == 0 and sy == 0 then return 0, 0 end
-    local wx = (sx + sy) * SQ
-    local wy = (sy - sx) * SQ
-    local len = math.sqrt(wx * wx + wy * wy)
-    return wx / len, wy / len
+local function keyDown(name)
+    local ok, v = pcall(function() return isKeyDown(name) end)
+    return ok and v or false
+end
+
+-- 각도 차이를 -180~180 으로
+local function wrapDeg(a)
+    while a > 180 do a = a - 360 end
+    while a < -180 do a = a + 360 end
+    return a
+end
+
+local function approach(v, target, rate, dt)
+    local k = rate * dt
+    if k > 1 then k = 1 end
+    return v + (target - v) * k
+end
+
+-- 입력 -> 목표 (수직 m/s, 수평 타일/초). table 은 HaloDrop.FF 또는 HaloDrop.CP
+local function targets(tbl, vBase, hBase, pitch, diving)
+    local base = tbl.neutral
+    local toward
+    if pitch >= 0 then
+        toward = diving and tbl.dive or tbl.glide
+    else
+        toward = tbl.brake
+    end
+    local f = math.abs(pitch)
+    local v = base.v + (toward.v - base.v) * f
+    local h = base.h + (toward.h - base.h) * f
+    return v * vBase, h * hBase
 end
 
 -- ── 상태 전이 ─────────────────────────────────────────────────────────────────
@@ -148,8 +218,9 @@ function HaloDropJumper.board()
     J.lastTs = getTimestampMs()
     J.released = false
     J.chuteSent = false
+    J.vz, J.vh = 0, 0
     planeSoundStart(p)
-    log(string.format("board: from (%.1f,%.1f,%.1f)", p:getX(), p:getY(), p:getZ()))
+    log(string.format("board: from (%.1f,%.1f,%.1f) -> A=(%.0f,%.0f)", p:getX(), p:getY(), p:getZ(), HaloDrop.C.fl.ax, HaloDrop.C.fl.ay))
 end
 
 local function jump(p, reason)
@@ -157,9 +228,14 @@ local function jump(p, reason)
     J.state = "FREEFALL"
     J.x, J.y = p:getX(), p:getY()
     J.alt = HaloDrop.opt("JumpAltitude")
+    J.heading = HaloDropFlight.headingDeg(HaloDrop.C.fl)
+    J.pitch = 0
+    -- 뛰어내린 순간 수송기 속도를 이어받는다 (수평), 수직은 0 에서 가속
+    J.vh = HaloDrop.C.fl.speed
+    J.vz = 0
     planeSoundStop(p)
     send(p, "Jumped", { id = HaloDrop.C.id, reason = reason })
-    log(string.format("jump (%s) at (%.1f,%.1f) alt=%.0fm", reason, J.x, J.y, J.alt))
+    log(string.format("jump (%s) at (%.1f,%.1f) alt=%.0fm heading=%.0f", reason, J.x, J.y, J.alt, J.heading))
 end
 
 local function openChute(p, reason)
@@ -170,15 +246,16 @@ local function openChute(p, reason)
         J.chuteSent = true
         send(p, "ChuteOpen", { id = HaloDrop.C.id, reason = reason, alt = math.floor(J.alt) })
     end
-    log(string.format("chute open (%s) alt=%.0fm", reason, J.alt))
+    log(string.format("chute open (%s) alt=%.0fm vz=%.1f vh=%.1f", reason, J.alt, J.vz, J.vh))
 end
 
 local function land(p)
     local chute = J.state == "CANOPY"
     finish(p)
     chuteUnwear(p, "landed")
+    _guardUntil = getTimestampMs() + CHUTE_GUARD_MS
     send(p, "Landed", { id = HaloDrop.C.id, chute = chute })
-    log(string.format("landed at (%.1f,%.1f,%.1f) chute=%s", p:getX(), p:getY(), p:getZ(), tostring(chute)))
+    log(string.format("landed at (%.1f,%.1f,%.1f) chute=%s vz=%.1f vh=%.1f", p:getX(), p:getY(), p:getZ(), tostring(chute), J.vz or 0, J.vh or 0))
 end
 
 function HaloDropJumper.onRoundEnd()
@@ -205,14 +282,13 @@ local function onPlayerUpdate(p)
         J.nextLog = now + 1000
         local h = -1
         pcall(function() h = p:getHeightAboveFloor() end)
-        -- 애니 상태 3단계: AI 상태 / 액션 컨텍스트 상태 / AdvancedAnimator 루트 상태
         local ai, act, anim = "?", "?", "?"
         pcall(function() ai = tostring(p:getCurrentStateName()) end)
         pcall(function() act = tostring(p:getActionStateName()) end)
         pcall(function() anim = tostring(p:getAnimationStateName()) end)
-        log(string.format("tick state=%s alt=%.0fm z=%.2f pos=(%.1f,%.1f) fall=%.2f h=%.2f released=%s falling=%s ai=%s action=%s anim=%s",
-            tostring(J.state), J.alt or -1, p:getZ(), p:getX(), p:getY(), p:getLastFallSpeed(), h,
-            tostring(J.released), tostring(p:isFalling()), ai, act, anim))
+        log(string.format("tick state=%s alt=%.0fm z=%.2f pos=(%.1f,%.1f) vz=%.1f vh=%.1f hdg=%.0f pitch=%.2f fall=%.2f h=%.2f released=%s falling=%s ai=%s action=%s anim=%s",
+            tostring(J.state), J.alt or -1, p:getZ(), p:getX(), p:getY(), J.vz or 0, J.vh or 0, J.heading or 0, J.pitch or 0,
+            p:getLastFallSpeed(), h, tostring(J.released), tostring(p:isFalling()), ai, act, anim))
     end
 
     if J.state == "ABOARD" then
@@ -229,25 +305,53 @@ local function onPlayerUpdate(p)
         return
     end
 
-    -- 수평 조향
+    -- ── 강하 모델 ──
     local canopy = J.state == "CANOPY"
-    local steer = canopy and HaloDrop.opt("CanopySteer") or HaloDrop.opt("FreefallSteer")
-    local dx, dy = steerDir()
-    if dx ~= 0 or dy ~= 0 then
-        J.x = J.x + dx * steer * dt
-        J.y = J.y + dy * steer * dt
-        p:setForwardDirection(dx, dy)
-    end
-    local speed = canopy and HaloDrop.opt("CanopySpeed") or HaloDrop.opt("FreefallSpeed")
+    local turnRate = canopy and HaloDrop.opt("CanopyTurnRate") or HaloDrop.opt("FreefallTurnRate")
+    local accel = canopy and HaloDrop.opt("CanopyAccel") or HaloDrop.opt("FreefallAccel")
+    local vBase = canopy and HaloDrop.opt("CanopySpeed") or HaloDrop.opt("FreefallSpeed")
+    local hBase = canopy and HaloDrop.opt("CanopySteer") or HaloDrop.opt("FreefallSteer")
+    local tbl = canopy and HaloDrop.CP or HaloDrop.FF
 
-    if not J.released and J.alt - speed * dt > carryAltM() then
+    -- 입력
+    local turn = 0
+    if keyDown("Left") then turn = turn - 1 end
+    if keyDown("Right") then turn = turn + 1 end
+    local pitchTarget = 0
+    if keyDown("Forward") then pitchTarget = pitchTarget + 1 end
+    if keyDown("Backward") then pitchTarget = pitchTarget - 1 end
+    local diving = pitchTarget > 0 and keyDown("Run")
+
+    -- heading: 선회 속도 한도 안에서만 돈다
+    J.heading = J.heading + turn * turnRate * dt
+    J.heading = wrapDeg(J.heading)
+    -- pitch: 즉시 +-1 로 튀지 않고 PitchRate 로 기운다
+    local pr = HaloDrop.opt("PitchRate") * dt
+    if J.pitch < pitchTarget then J.pitch = math.min(pitchTarget, J.pitch + pr)
+    elseif J.pitch > pitchTarget then J.pitch = math.max(pitchTarget, J.pitch - pr) end
+
+    -- 목표 속도 -> 관성으로 수렴
+    local tv, th = targets(tbl, vBase, hBase, J.pitch, diving)
+    J.vz = approach(J.vz, tv, accel, dt)
+    J.vh = approach(J.vh, th, accel, dt)
+
+    -- 수평 이동은 heading 방향으로만
+    local r = math.rad(J.heading)
+    local hx, hy = math.cos(r), math.sin(r)
+    if J.vh > 0.01 then
+        J.x = J.x + hx * J.vh * dt
+        J.y = J.y + hy * J.vh * dt
+    end
+    p:setForwardDirection(hx, hy)
+
+    if not J.released and J.alt - J.vz * dt > carryAltM() then
         -- 붙잡기: 가상 고도만 줄인다
-        J.alt = J.alt - speed * dt
+        J.alt = J.alt - J.vz * dt
         hold(p, J.x, J.y, carryZ)
     else
         if not J.released then
             J.released = true
-            log(string.format("release to engine fall at z=%.1f state=%s", p:getZ(), J.state))
+            log(string.format("release to engine fall at z=%.1f state=%s vz=%.1f", p:getZ(), J.state, J.vz))
         end
         -- 놓기: 엔진이 z 를 내린다. 수평 위치와 낙하 속도만 정한다.
         p:setForceX(J.x)
@@ -258,7 +362,7 @@ local function onPlayerUpdate(p)
             land(p)
             return
         end
-        local v = speed / HaloDrop.M_PER_FLOOR
+        local v = J.vz / HaloDrop.M_PER_FLOOR
         if h < HaloDrop.BRAKE_H and canopy then v = HaloDrop.LAND_SPEED end
         p:setLastFallSpeed(v)
     end

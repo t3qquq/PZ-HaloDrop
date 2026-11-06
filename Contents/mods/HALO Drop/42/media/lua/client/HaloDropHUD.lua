@@ -37,5 +37,11 @@ local function onPreUIDraw()
     local tm = getTextManager()
     tm:DrawStringCentre(UIFont.Large, x + 2, y + 2, text, 0, 0, 0, 0.8)
     tm:DrawStringCentre(UIFont.Large, x, y, text, 1, 1, 1, 1)
+    -- 강하 중 조작 안내 (한 줄, 작은 글씨)
+    if J.state == "FREEFALL" or J.state == "CANOPY" then
+        local hint = getText("IGUI_HaloDrop_Hint", getKeyName(getCore():getKey("Run")))
+        tm:DrawStringCentre(UIFont.Small, x + 1, y + 31, hint, 0, 0, 0, 0.8)
+        tm:DrawStringCentre(UIFont.Small, x, y + 30, hint, 1, 1, 1, 0.9)
+    end
 end
 Events.OnPreUIDraw.Add(onPreUIDraw)
