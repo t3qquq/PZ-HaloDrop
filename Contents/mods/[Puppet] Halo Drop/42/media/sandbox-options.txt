@@ -1,0 +1,56 @@
+VERSION = 1,
+
+option HaloDrop.PlaneSpeed = {
+    type = double, min = 5.0, max = 19.0, default = 16.0,
+    page = HaloDrop, translation = HaloDrop_PlaneSpeed,
+}
+
+option HaloDrop.PathLength = {
+    type = integer, min = 300, max = 6000, default = 1500,
+    page = HaloDrop, translation = HaloDrop_PathLength,
+}
+
+option HaloDrop.PlaneZ = {
+    type = integer, min = 3, max = 31, default = 15,
+    page = HaloDrop, translation = HaloDrop_PlaneZ,
+}
+
+option HaloDrop.CarryZ = {
+    type = integer, min = 3, max = 31, default = 10,
+    page = HaloDrop, translation = HaloDrop_CarryZ,
+}
+
+option HaloDrop.JumpAltitude = {
+    type = integer, min = 50, max = 3000, default = 600,
+    page = HaloDrop, translation = HaloDrop_JumpAltitude,
+}
+
+option HaloDrop.FreefallSpeed = {
+    type = double, min = 5.0, max = 80.0, default = 40.0,
+    page = HaloDrop, translation = HaloDrop_FreefallSpeed,
+}
+
+option HaloDrop.CanopySpeed = {
+    type = double, min = 1.0, max = 20.0, default = 6.0,
+    page = HaloDrop, translation = HaloDrop_CanopySpeed,
+}
+
+option HaloDrop.FreefallSteer = {
+    type = double, min = 0.0, max = 19.0, default = 12.0,
+    page = HaloDrop, translation = HaloDrop_FreefallSteer,
+}
+
+option HaloDrop.CanopySteer = {
+    type = double, min = 0.0, max = 19.0, default = 8.0,
+    page = HaloDrop, translation = HaloDrop_CanopySteer,
+}
+
+option HaloDrop.AutoOpenAltitude = {
+    type = integer, min = 0, max = 1000, default = 100,
+    page = HaloDrop, translation = HaloDrop_AutoOpenAltitude,
+}
+
+option HaloDrop.HideCarried = {
+    type = boolean, default = true,
+    page = HaloDrop, translation = HaloDrop_HideCarried,
+}

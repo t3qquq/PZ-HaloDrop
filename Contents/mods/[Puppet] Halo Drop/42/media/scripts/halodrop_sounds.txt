@@ -1,0 +1,27 @@
+module HaloDrop
+{
+    /* 탑승 중 엔진음. 퐁듀 수송기 투하 엔진음(airdrop_plane.wav: C-17 실녹음 스펙트럼에 맞춘
+       12초 무이음 루프) 그대로. 재생·정지는 HaloDropJumper.lua 가 자기 캐릭터 emitter 로 한다. */
+    sound halodrop_plane
+    {
+        category = Object,
+        loop = true,
+        clip
+        {
+            file = media/sound/halodrop_plane.wav,
+            volume = 0.5,
+        }
+    }
+
+    /* 낙하산 펼침. 퐁듀 차량 투하 펼침음(vehicle_airdrop_chute.wav) 그대로. */
+    sound halodrop_chute
+    {
+        category = Object,
+        loop = false,
+        clip
+        {
+            file = media/sound/halodrop_chute.wav,
+            volume = 0.5,
+        }
+    }
+}

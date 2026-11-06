@@ -1,0 +1,12 @@
+halodrop_c17_body.fbx / textures/Vehicles/Vehicle_HaloDropC17.png
+
+"c17 Globemaster with animation" by pilotcandle5470 (https://sketchfab.com/runzew68)
+is licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/).
+Source: https://sketchfab.com/3d-models/c17-globemaster-with-animation-809e3e068f324db6b9cfe57611a69726
+Distributed by AiZity (https://aizity.com): cleaned up (centered, grounded, renamed), converted to FBX.
+
+Changes for PongDu (Project Zomboid B42 mod), reused unchanged by Halo Drop:
+- Joined 351 meshes into one, merged duplicate vertices
+- Decimated from about 259,000 to 15,000 triangles
+- New UV layout; base color of all materials baked into a single 2048x2048 texture
+- Rescaled and reoriented to the vehicle model convention (Y-up, nose +Z)

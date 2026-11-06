@@ -1,7 +1,7 @@
-name=[Puppet] Halo Drop - 공수강하
+name=HALO Drop
 poster=poster.png
 icon=icon.png
 id=t3HaloDrop
-description=수송기에서 뛰어내려 낙하산으로 강하하는 공수강하(HALO) 모드
-versionMin=42.0
+description=
+versionMin=42.21
 modversion=0.1.0

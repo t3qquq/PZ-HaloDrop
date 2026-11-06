@@ -10,8 +10,9 @@
 탑승한 플레이어는 비행 중 **상호작용 키**(기본 `E`)를 눌러 뛰어내리고,
 자유낙하 중 **한 번 더 누르면 낙하산**이 펴져 그때부터 천천히 내려온다.
 
-> 개발 초기 단계. 구조 설계만 확정했고 코드는 아직 없다.
-> 엔진 동작 검증(스파이크 테스트)을 먼저 한 뒤 본 구현에 들어간다.
+> 개발 초기 단계 (0.1.0). 핵심 루프(라운드 → 탑승 → 뛰어내리기 → 자유낙하 → 낙하산 → 착지)를
+> 구현했고 인게임 검증 전이다. 라운드는 어드민이 월드 우클릭 메뉴로 시작하며,
+> 출발점 A 는 시작한 사람 위치, 방향은 무작위다.
 
 ---
 
@@ -39,7 +40,7 @@
 | 낙하산 아이템 착용·해제 | 서버 | B42 아이템은 서버 권위 (`sendAddItemToContainer`, `setWornItem`) |
 | HUD (고도계·키 안내·지도 경로선) | 각 클라 | 표시 전용 |
 
-## 🗂 디렉터리 구조 (예정)
+## 🗂 디렉터리 구조
 
 ```
 Contents/mods/[Puppet] Halo Drop/
@@ -50,10 +51,9 @@ Contents/mods/[Puppet] Halo Drop/
     │   ├── HaloDropFlight.lua      경로 계산 (위치·방향·진행률 ← 시각)
     │   └── Translate/{KO,EN}/      IG_UI / Sandbox / ItemName / ContextMenu .json
     ├── lua/server/
-    │   ├── HaloDropServer.lua      라운드 상태기계, 커맨드 처리, 수송기 스폰·제거·파일럿 교체
-    │   └── HaloDropChuteServer.lua 낙하산 아이템 지급·착용·회수
+    │   └── HaloDropServer.lua      라운드 상태기계, 커맨드 처리, 수송기 스폰·제거·파일럿 교체, 낙하산 지급·회수
     ├── lua/client/
-    │   ├── HaloDropClient.lua      서버 커맨드 수신, 비행 정보 캐시
+    │   ├── HaloDropClient.lua      서버 커맨드 수신, 비행 정보 캐시, 탑승자 숨기기
     │   ├── HaloDropPilot.lua       파일럿 클라: 매 틱 수송기 setWorldTransform
     │   ├── HaloDropJumper.lua      자기 캐릭터 상태기계, 키 입력, 위치·낙하 속도 제어
     │   ├── HaloDropHUD.lua         고도계, 키 안내, 지도 경로선
@@ -68,24 +68,30 @@ Contents/mods/[Puppet] Halo Drop/
 
 | 방향 | 커맨드 | 내용 |
 | --- | --- | --- |
-| C → S | `Start` / `Stop` | 어드민 라운드 시작·중지 |
+| C → S | `Start` / `Stop` | 어드민 라운드 시작·종료 (종료된 라운드에 한 번 더 `Stop` 이면 즉시 정리) |
 | C → S | `Jumped` / `ChuteOpen` / `Landed` | 자기 캐릭터 상태 보고 (로그·낙하산 착용 트리거) |
+| C → S | `Cleanup` | 접속 시 남아 있던 낙하산 회수 요청 |
 | S → C | `Flight` | 경로 `ax, ay, bx, by, speed`, 서버 기준 경과 ms, 라운드 번호 |
 | S → C | `Pilot` | 수송기 vid, 파일럿 onlineID |
-| S → C | `End` | 라운드 종료 (남은 탑승자 강제 투하) |
+| S → C | `Member` | 탑승자 하차 (숨김 해제) |
+| S → C | `PlaneGone` | 수송기 차량 제거 |
+| S → C | `End` | 경로 끝·어드민 종료 (남은 탑승자 강제 투하) |
+| S → C | `Closed` | 라운드 정리 (전원 착지 또는 종료 후 120초) |
 
-## ⚙️ 샌드박스 옵션 (예정, 페이지 `HaloDrop`)
+## ⚙️ 샌드박스 옵션 (페이지 `HaloDrop`)
 
 | 옵션 | 기본 | 설명 |
 | --- | --- | --- |
 | `PlaneSpeed` | 16 타일/초 | 수송기 속도. 탑승 중 캐릭터도 이 속도로 움직인다 |
 | `PathLength` | 1500 타일 | A–B 거리 |
-| `CarryZ` | 10 층 | 실제 z 상한. 스파이크 테스트로 확정 |
+| `PlaneZ` | 15 층 | 수송기 차량이 나는 실제 층 (퐁듀 수송기와 같음) |
+| `CarryZ` | 10 층 | 탑승·자유낙하 중 캐릭터가 머무는 실제 층 상한 |
 | `JumpAltitude` | 600 m | 가상 고도 (수송기 고도) |
 | `FreefallSpeed` | 40 m/s | 자유낙하 하강 속도 |
 | `CanopySpeed` | 6 m/s | 낙하산 하강 속도 (≈ 2.45 층/초) |
 | `FreefallSteer` / `CanopySteer` | 12 / 8 타일/초 | 공중 수평 이동 속도 |
 | `AutoOpenAltitude` | 100 m | 이 고도에서 낙하산 자동 개방. 0 이면 끔 (안 펴면 추락) |
+| `HideCarried` | 켬 | 탑승 중인 다른 플레이어를 각 클라 화면에서 숨긴다 |
 
 ## ⚠️ 엔진 제약 (설계에 반영한 것)
 
@@ -105,7 +111,9 @@ Contents/mods/[Puppet] Halo Drop/
 - **C-17 수송기 모델**: "c17 Globemaster with animation" by pilotcandle5470
   (https://sketchfab.com/runzew68), CC BY 4.0. 퐁듀에서 경량화한 버전을 가져온다.
   상세 출처·변경 내역은 `models_X/vehicles/` 의 LICENSE 파일에 함께 둔다.
-- **낙하산 모델**: 퐁듀 에셋. 원 출처 확인 후 기재.
+- **낙하산 모델**: Parachuting Start 모드(Panopticon, Glytch3r, Sapph, Dante271)의 OpenParachute 메시·텍스처.
+  퐁듀 좀비 낙하산과 같은 파일이다. 워크샵 공개 전 원작자 허락 여부 확인 필요.
+- **엔진음·낙하산 펼침음**: 퐁듀 수송기 투하 음원 그대로.
 
 ## 🔧 개발 참조
 
