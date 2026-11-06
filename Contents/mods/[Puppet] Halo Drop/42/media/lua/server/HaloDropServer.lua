@@ -160,6 +160,26 @@ local function pilotHandoff()
     end
 end
 
+-- ── 탑승 구역 ─────────────────────────────────────────────────────────────────
+-- 샌드박스 ZoneX1~ZoneX2, ZoneY1~ZoneY2 (월드 타일 좌표, 양끝 포함). X2 > X1 이고 Y2 > Y1 일 때만 켜진다.
+-- 기본값 0 은 꺼짐 = 기존처럼 접속자 전원 탑승. 높이(z)는 보지 않는다 (오일리그는 여러 층).
+local function boardingZone()
+    local x1, y1 = HaloDrop.opt("ZoneX1"), HaloDrop.opt("ZoneY1")
+    local x2, y2 = HaloDrop.opt("ZoneX2"), HaloDrop.opt("ZoneY2")
+    if x2 > x1 and y2 > y1 then
+        return { x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
+    end
+    if x1 ~= 0 or y1 ~= 0 or x2 ~= 0 or y2 ~= 0 then
+        log(string.format("boarding zone invalid (%d,%d)-(%d,%d): need X2>X1 and Y2>Y1, filter OFF", x1, y1, x2, y2))
+    end
+    return nil
+end
+
+local function inZone(zone, p)
+    local x, y = math.floor(p:getX()), math.floor(p:getY())
+    return x >= zone.x1 and x <= zone.x2 and y >= zone.y1 and y <= zone.y2
+end
+
 -- ── 라운드 ────────────────────────────────────────────────────────────────────
 local function startRound(starter)
     if R then
@@ -177,13 +197,24 @@ local function startRound(starter)
         members = {},
         ended = false,
     }
+    local zone = boardingZone()
     local n = 0
+    local outside = {}
     for _, p in ipairs(players()) do
         -- 차에 탄 사람은 붙잡기가 차량 좌석과 충돌하므로 뺀다
         if not p:isDead() and not p:getVehicle() then
-            R.members[HaloDrop.playerKey(p)] = { aboard = true, landed = false, name = p:getUsername() }
-            n = n + 1
+            if zone and not inZone(zone, p) then
+                outside[#outside + 1] = string.format("%s(%.0f,%.0f)", tostring(p:getUsername()), p:getX(), p:getY())
+            else
+                R.members[HaloDrop.playerKey(p)] = { aboard = true, landed = false, name = p:getUsername() }
+                n = n + 1
+            end
         end
+    end
+    if zone then
+        log(string.format("round %d boarding zone (%d,%d)-(%d,%d) starterInZone=%s outside=%d [%s]",
+            R.id, zone.x1, zone.y1, zone.x2, zone.y2, tostring(inZone(zone, starter)), #outside, table.concat(outside, " ")))
+        if n == 0 then log("round " .. tostring(R.id) .. " WARNING: nobody inside boarding zone") end
     end
     log(string.format("round %d start by %s: A=(%.0f,%.0f) B=(%.0f,%.0f) angle=%d speed=%.1f len=%d dur=%dms members=%d",
         R.id, tostring(starter:getUsername()), R.fl.ax, R.fl.ay, R.fl.bx, R.fl.by, ang, speed, len, R.fl.durMs, n))
