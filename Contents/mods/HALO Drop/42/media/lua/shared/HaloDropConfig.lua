@@ -48,6 +48,12 @@ HaloDrop.CP = {
     brake   = { v = 0.85, h = 0.30 },   -- S: 플레어 (수치는 배그 자료 없음, 임의)
 }
 
+-- ── 공중 칸 채우기 (HaloDropJumper airFill). 런 4 쿼터뷰 검정 화면 실험. CHUNKS 0 이면 끔 ──────
+HaloDrop.AIR_FILL = {
+    CHUNKS   = 3,   -- 플레이어 청크 기준 반경(청크). 3 = 7x7 청크 = ±24칸
+    PER_TICK = 4,   -- 틱당 만드는 청크층 수 (64칸씩). 7x7x3층 = 147 -> 약 37틱
+}
+
 -- ── 하늘 뷰 (HaloDropSky.lua) 상수. 지도 줌은 샌드박스 SkyZoom. ─────────────────────
 HaloDrop.SKY = {
     LEAD       = 90,     -- 지도 중심을 진행 방향으로 당기는 거리(타일). 기체 앞쪽이 더 보이게

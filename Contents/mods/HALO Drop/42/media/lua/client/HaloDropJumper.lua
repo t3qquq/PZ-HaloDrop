@@ -225,6 +225,68 @@ local function targets(tbl, vBase, hBase, pitch, diving)
     return v * vBase, h * hBase
 end
 
+
+-- ── 공중 칸 채우기 (런 4 검정 화면 대응, 추정 기반 실험) ─────────────────────────
+-- B42 청크는 minLevel~maxLevel 사이 층만 갖는다(IsoChunk.setSquare :3100 이 새 z 가 오면 범위를 늘림,
+-- 들판 청크는 0층뿐). 조명/시야 네이티브는 청크마다 그 범위만 갱신(LightingJNI.updateChunk :604)하므로
+-- z=3 에 뜬 플레이어 눈과 지면 사이 1~3층 데이터가 아예 없어 검게 나오는 것으로 추정.
+-- 건물에서 떨어질 땐 건물 청크가 지붕까지 층을 갖고 있어 멀쩡하다. 그래서 주변 청크의 1~z 층에
+-- 빈 칸을 클라에서 만들어(getOrCreateGridSquare, IsoCell :3296 LuaMethod) 층 범위를 넓혀 본다.
+-- 비용: 청크·층 하나당 64칸, 틱당 AIR_FILL.PER_TICK 청크층. 서버와 무관한 클라 전용 빈 칸.
+local _air = { done = {}, chunks = 0, squares = 0, nextLog = nil }
+
+local function airFillReset()
+    _air.done, _air.chunks, _air.squares, _air.nextLog = {}, 0, 0, nil
+end
+
+local function airFill(p)
+    local A = HaloDrop.AIR_FILL
+    if not A or A.CHUNKS <= 0 then return end
+    local pz = math.floor(p:getZ())
+    if pz < 1 then return end
+    local cell = getCell()
+    local cx, cy = math.floor(p:getX() / 8), math.floor(p:getY() / 8)
+    local budget = A.PER_TICK
+    for r = 0, A.CHUNKS do
+        for wx = cx - r, cx + r do
+            for wy = cy - r, cy + r do
+                if math.max(math.abs(wx - cx), math.abs(wy - cy)) == r then
+                    -- 이 청크가 클라에 올라와 있을 때만 (0층 칸 존재)
+                    if cell:getGridSquare(wx * 8, wy * 8, 0) ~= nil then
+                        for z = 1, pz do
+                            local key = wx .. "," .. wy .. "," .. z
+                            if not _air.done[key] then
+                                if budget <= 0 then return end
+                                budget = budget - 1
+                                _air.done[key] = true
+                                local n = 0
+                                local ok, err = pcall(function()
+                                    for x = 0, 7 do
+                                        for y = 0, 7 do
+                                            if cell:getOrCreateGridSquare(wx * 8 + x, wy * 8 + y, z) then n = n + 1 end
+                                        end
+                                    end
+                                end)
+                                if not ok then
+                                    log("air fill FAILED at chunk (" .. wx .. "," .. wy .. ") z=" .. z .. " err=" .. tostring(err))
+                                    return
+                                end
+                                _air.chunks = _air.chunks + 1
+                                _air.squares = _air.squares + n
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    local now = getTimestampMs()
+    if not _air.nextLog or now >= _air.nextLog then
+        _air.nextLog = now + 2000
+        log(string.format("air fill: chunk-levels=%d squares=%d around chunk (%d,%d) z<=%d", _air.chunks, _air.squares, cx, cy, pz))
+    end
+end
+
 -- ── 상태 전이 ─────────────────────────────────────────────────────────────────
 local function finish(p)
     J.state = nil
@@ -257,6 +319,7 @@ local function startJump(p, reason)
     J.state = "JUMPING"
     J.x, J.y = x, y
     J.jump = { at = now, groundAt = nil, planeSeen = false, reason = reason }
+    airFillReset()
     HaloDropSky.setCover(1)
     send(p, "Jumped", { id = C.id, reason = reason, x = math.floor(x), y = math.floor(y) })
     hold(p, x, y, HaloDrop.opt("CarryZ"))
@@ -382,6 +445,7 @@ local function onPlayerUpdate(p)
             jp.groundAt = now
             log(string.format("jump: ground loaded after %dms at (%.0f,%.0f)", waited, J.x, J.y))
         end
+        if jp.groundAt then airFill(p) end
         local maxMs = HaloDrop.opt("JumpWaitMax") * 1000
         if jp.planeSeen then
             jump(p, "plane passed")
@@ -395,6 +459,7 @@ local function onPlayerUpdate(p)
     end
 
     -- ── 강하 모델 ──
+    airFill(p)
     local canopy = J.state == "CANOPY"
     local turnRate = canopy and HaloDrop.opt("CanopyTurnRate") or HaloDrop.opt("FreefallTurnRate")
     local accel = canopy and HaloDrop.opt("CanopyAccel") or HaloDrop.opt("FreefallAccel")
