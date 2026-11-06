@@ -1,0 +1,10 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# B42: 번역 파일은 UTF-8 JSON 이다 (42.15.0 부터).
+# B41 의 working-tree-encoding=UTF-16 설정은 더 이상 필요하지 않다.
+Contents/mods/**/media/lua/shared/Translate/**/*.json text eol=lf
+
+# workshop.txt 는 인게임 업로더가 시스템 코드페이지(한국어 윈도우 = CP949)로
+# 쓴다. 줄바꿈·인코딩 정규화를 모두 끄고 바이트 그대로 보관한다.
+workshop.txt -text

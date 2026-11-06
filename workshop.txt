@@ -1,0 +1,6 @@
+version=1
+id=
+title=[Puppet] Halo Drop - 공수강하 B42
+description=수송기에서 뛰어내려 낙하산으로 강하하는 공수강하(HALO) 모드
+tags=Build 42
+visibility=unlisted
