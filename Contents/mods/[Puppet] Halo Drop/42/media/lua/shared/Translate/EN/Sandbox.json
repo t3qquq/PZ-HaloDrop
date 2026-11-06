@@ -21,5 +21,13 @@
   "Sandbox_HaloDrop_AutoOpenAltitude": "Parachute auto-open altitude (m)",
   "Sandbox_HaloDrop_AutoOpenAltitude_tooltip": "The parachute opens by itself at this altitude during free fall. 0 disables it.",
   "Sandbox_HaloDrop_HideCarried": "Hide players on board",
-  "Sandbox_HaloDrop_HideCarried_tooltip": "Hides other players while they are inside the plane."
+  "Sandbox_HaloDrop_HideCarried_tooltip": "Hides other players while they are inside the plane.",
+  "Sandbox_HaloDrop_ZoneX1": "Boarding zone X1 (west)",
+  "Sandbox_HaloDrop_ZoneX1_tooltip": "West edge of the boarding zone, in world tile coordinates (inclusive). The zone is used only when X2 > X1 and Y2 > Y1. Leave all four at 0 to board every player.",
+  "Sandbox_HaloDrop_ZoneY1": "Boarding zone Y1 (north)",
+  "Sandbox_HaloDrop_ZoneY1_tooltip": "North edge of the boarding zone, in world tile coordinates (inclusive).",
+  "Sandbox_HaloDrop_ZoneX2": "Boarding zone X2 (east)",
+  "Sandbox_HaloDrop_ZoneX2_tooltip": "East edge of the boarding zone, in world tile coordinates (inclusive).",
+  "Sandbox_HaloDrop_ZoneY2": "Boarding zone Y2 (south)",
+  "Sandbox_HaloDrop_ZoneY2_tooltip": "South edge of the boarding zone, in world tile coordinates (inclusive). Floor (height) is not checked."
 }

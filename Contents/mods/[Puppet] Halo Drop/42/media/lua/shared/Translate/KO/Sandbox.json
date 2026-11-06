@@ -21,5 +21,13 @@
   "Sandbox_HaloDrop_AutoOpenAltitude": "낙하산 자동 개방 고도 (m)",
   "Sandbox_HaloDrop_AutoOpenAltitude_tooltip": "자유낙하 중 이 고도에 닿으면 낙하산이 저절로 펴진다. 0이면 자동 개방 없음.",
   "Sandbox_HaloDrop_HideCarried": "탑승자 숨기기",
-  "Sandbox_HaloDrop_HideCarried_tooltip": "수송기에 타고 있는 다른 플레이어를 화면에서 숨긴다."
+  "Sandbox_HaloDrop_HideCarried_tooltip": "수송기에 타고 있는 다른 플레이어를 화면에서 숨긴다.",
+  "Sandbox_HaloDrop_ZoneX1": "탑승 구역 X1 (서쪽)",
+  "Sandbox_HaloDrop_ZoneX1_tooltip": "탑승 구역의 서쪽 끝 (월드 타일 좌표, 경계 포함). X2 > X1 이고 Y2 > Y1 일 때만 구역이 적용된다. 네 값이 모두 0이면 접속자 전원이 탑승한다.",
+  "Sandbox_HaloDrop_ZoneY1": "탑승 구역 Y1 (북쪽)",
+  "Sandbox_HaloDrop_ZoneY1_tooltip": "탑승 구역의 북쪽 끝 (월드 타일 좌표, 경계 포함).",
+  "Sandbox_HaloDrop_ZoneX2": "탑승 구역 X2 (동쪽)",
+  "Sandbox_HaloDrop_ZoneX2_tooltip": "탑승 구역의 동쪽 끝 (월드 타일 좌표, 경계 포함).",
+  "Sandbox_HaloDrop_ZoneY2": "탑승 구역 Y2 (남쪽)",
+  "Sandbox_HaloDrop_ZoneY2_tooltip": "탑승 구역의 남쪽 끝 (월드 타일 좌표, 경계 포함). 층(높이)은 보지 않는다."
 }
