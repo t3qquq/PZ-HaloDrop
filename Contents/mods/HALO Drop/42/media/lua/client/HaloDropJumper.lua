@@ -283,8 +283,122 @@ local function airFill(p)
     local now = getTimestampMs()
     if not _air.nextLog or now >= _air.nextLog then
         _air.nextLog = now + 2000
-        log(string.format("air fill: chunk-levels=%d squares=%d around chunk (%d,%d) z<=%d", _air.chunks, _air.squares, cx, cy, pz))
+        -- 반경 1 청크(3x3) x 1~pz 층 중 채운 비율: 검정 화면과의 상관 확인용 (런 5)
+        local coreDone, coreAll = 0, 0
+        for wx = cx - 1, cx + 1 do
+            for wy = cy - 1, cy + 1 do
+                for z = 1, pz do
+                    coreAll = coreAll + 1
+                    if _air.done[wx .. "," .. wy .. "," .. z] then coreDone = coreDone + 1 end
+                end
+            end
+        end
+        log(string.format("air fill: chunk-levels=%d squares=%d around chunk (%d,%d) z<=%d core=%d/%d",
+            _air.chunks, _air.squares, cx, cy, pz, coreDone, coreAll))
     end
+end
+
+-- ── 하강 줌 (HaloDrop.DESCENT_ZOOM) ───────────────────────────────────────────
+-- 실제 z 는 CarryZ 에 고정이라 고도가 변하는 시각 단서가 없다(런 5). 뛰어내릴 때 옵션의 가장 먼 줌 레벨까지
+-- 빼고 가상 고도가 ALT_NEAR 로 내려오는 동안 원래 줌으로 당긴다.
+-- 엔진: 줌 목표는 레벨 목록의 값과 == 비교로만 옮겨 다니므로(MultiTextureFBO2.getNextZoom) 목록을 촘촘히 깔고
+--   (setZoomLevels, 바닐라 Tutorial1.lua:297) doZoomScroll 로 한 단계씩 민다. 보간은 엔진이 프레임당 0.02.
+--   getZoom/getMaxZoom 은 tileScale/2 가 곱해진 표시값, getNextZoom(i, 0)·목록은 내부값 -> 내부값으로 통일.
+--   자동 줌(autoZoom)이 켜져 있으면 엔진이 매 프레임 목표를 덮어쓰므로 잠시 끈다.
+local Z = { active = false }
+
+local function parsePercents(s)
+    local list = {}
+    local pos = 1
+    while true do
+        local a, b = string.find(s, ";", pos, true)
+        local tok = a and string.sub(s, pos, a - 1) or string.sub(s, pos)
+        local n = tonumber(tok)
+        if n then list[#list + 1] = n / 100 end
+        if not a then break end
+        pos = b + 1
+    end
+    return list
+end
+
+-- 옵션에 저장된 줌 레벨 목록(내부값, 큰 값 = 멀리). 비어 있으면 엔진 기본 목록
+local function optionZoomLevels()
+    local s = nil
+    pcall(function()
+        if Core.getTileScale() == 2 then s = getCore():getOptionZoomLevels2x() else s = getCore():getOptionZoomLevels1x() end
+    end)
+    local list = (s and s ~= "") and parsePercents(s) or {}
+    if #list == 0 then list = { 2.5, 2.25, 2.0, 1.75, 1.5, 1.25, 1.0, 0.75, 0.5, 0.25 } end
+    return list
+end
+
+local function descentZoomStart(p)
+    local D = HaloDrop.DESCENT_ZOOM
+    if not D or not D.ENABLED or Z.active then return end
+    local core = getCore()
+    local pi = p:getPlayerNum()
+    local ok, err = pcall(function()
+        local ts = Core.getTileScale() / 2
+        local near = core:getNextZoom(pi, 0)            -- 현재 목표 줌(내부값)
+        local far = core:getMaxZoom() / ts             -- 옵션 목록의 가장 먼 레벨(내부값)
+        if far <= near + D.STEP / 2 then
+            log(string.format("descent zoom: skipped (near=%.2f far=%.2f)", near, far))
+            return
+        end
+        local levels = {}
+        local v = far
+        while v > near + D.STEP / 2 do
+            levels[#levels + 1] = v
+            v = v - D.STEP
+        end
+        levels[#levels + 1] = near
+        Z.auto = core:getAutoZoom(pi)
+        if Z.auto then core:setAutoZoom(pi, false) end
+        setZoomLevels(unpack(levels))
+        -- 목표는 지금 near(목록 마지막) -> 한 단계씩 far 로
+        for _ = 1, #levels - 1 do core:doZoomScroll(pi, 1) end
+        Z.active, Z.levels, Z.idx, Z.alt0, Z.near, Z.far, Z.pi = true, levels, 1, J.alt, near, far, pi
+        log(string.format("descent zoom: start far=%.2f near=%.2f levels=%d autozoom=%s", far, near, #levels, tostring(Z.auto)))
+    end)
+    if not ok then log("descent zoom: start FAILED err=" .. tostring(err)) end
+end
+
+local function descentZoomTick()
+    if not Z.active then return end
+    local D = HaloDrop.DESCENT_ZOOM
+    local n = #Z.levels
+    local f = (J.alt - D.ALT_NEAR) / math.max(1, Z.alt0 - D.ALT_NEAR)   -- 1 = 출발 고도, 0 = ALT_NEAR
+    if f < 0 then f = 0 elseif f > 1 then f = 1 end
+    local want = n - math.floor(f * (n - 1) + 0.5)                      -- 1 = far, n = near
+    if want <= Z.idx then return end
+    local core = getCore()
+    local pi = Z.pi
+    local ok, err = pcall(function()
+        while Z.idx < want do
+            core:doZoomScroll(pi, -1)
+            Z.idx = Z.idx + 1
+        end
+    end)
+    if not ok then
+        log("descent zoom: tick FAILED err=" .. tostring(err))
+        Z.active = false
+    end
+end
+
+local function descentZoomStop(reason)
+    if not Z.active then return end
+    Z.active = false
+    local core = getCore()
+    local pi = Z.pi
+    local ok, err = pcall(function()
+        while Z.idx < #Z.levels do
+            core:doZoomScroll(pi, -1)
+            Z.idx = Z.idx + 1
+        end
+        setZoomLevels(unpack(optionZoomLevels()))
+        if Z.auto then core:setAutoZoom(pi, true) end
+    end)
+    log(string.format("descent zoom: stop (%s) target=%.2f ok=%s%s", tostring(reason), Z.near or -1, tostring(ok), ok and "" or (" err=" .. tostring(err))))
 end
 
 -- ── 상태 전이 ─────────────────────────────────────────────────────────────────
@@ -293,6 +407,7 @@ local function finish(p)
     planeSoundStop(p)
     p:setBlockMovement(false)
     HaloDropSky.close("finish")
+    descentZoomStop("finish")
 end
 
 function HaloDropJumper.board()
@@ -336,11 +451,14 @@ local function jump(p, why)
     J.alt = HaloDrop.opt("JumpAltitude")
     J.heading = HaloDropFlight.headingDeg(HaloDrop.C.fl)
     J.pitch = 0
-    -- 뛰어내린 순간 수송기 속도를 이어받는다 (수평), 수직은 0 에서 가속
-    J.vh = HaloDrop.C.fl.speed
+    -- 뛰어내린 순간 수송기 속도를 이어받는다 (수평), 수직은 0 에서 가속.
+    -- 상한 JUMP_VH_MAX: 런 5 에서 80 을 그대로 받아 로드 창을 벗어나 3초 스냅백 + 10초 current==null 이 났다
+    J.vh = math.min(HaloDrop.C.fl.speed, HaloDrop.JUMP_VH_MAX)
     J.vz = 0
+    J.waitLogged = nil
     planeSoundStop(p)
     HaloDropSky.close("freefall")
+    descentZoomStart(p)
     log(string.format("jump (%s) at (%.1f,%.1f) alt=%.0fm heading=%.0f waited=%dms ground=%s plane=%s",
         why, J.x, J.y, J.alt, J.heading, now - (jp.at or now),
         jp.groundAt and tostring(jp.groundAt - jp.at) .. "ms" or "no", tostring(jp.planeSeen)))
@@ -489,14 +607,22 @@ local function onPlayerUpdate(p)
     J.vz = approach(J.vz, tv, accel, dt)
     J.vh = approach(J.vh, th, accel, dt)
 
-    -- 수평 이동은 heading 방향으로만
+    -- 수평 이동은 heading 방향으로만. 다음 칸이 이 클라에 아직 안 올라와 있으면 가상 위치를 전진시키지 않는다
+    -- (런 5: 미로드 칸으로 나가면 postupdate 가 직전 칸 중앙으로 되돌리고, 가상 위치만 앞서가 far move 가 났다)
     local r = math.rad(J.heading)
     local hx, hy = math.cos(r), math.sin(r)
     if J.vh > 0.01 then
-        J.x = J.x + hx * J.vh * dt
-        J.y = J.y + hy * J.vh * dt
+        local nx, ny = J.x + hx * J.vh * dt, J.y + hy * J.vh * dt
+        if getCell():getGridSquare(math.floor(nx), math.floor(ny), 0) ~= nil then
+            J.x, J.y = nx, ny
+            J.waitLogged = nil
+        elseif not J.waitLogged then
+            J.waitLogged = true
+            log(string.format("fall: next square (%d,%d) not loaded -> holding horizontal", math.floor(nx), math.floor(ny)))
+        end
     end
     p:setForwardDirection(hx, hy)
+    descentZoomTick()
 
     if not J.released and J.alt - J.vz * dt > carryAltM() then
         -- 붙잡기: 가상 고도만 줄인다

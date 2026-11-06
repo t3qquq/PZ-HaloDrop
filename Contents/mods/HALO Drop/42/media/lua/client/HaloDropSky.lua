@@ -15,6 +15,7 @@
 --   HUD 는 HaloDropHUD 가 OnPostUIDraw 로 그린다 (OnPreUIDraw 는 UI 요소보다 먼저라 이 요소에 가려진다).
 -- 조정 키 (하늘 뷰가 열려 있을 때만, 값은 로그 `sky tune:` 으로): [ ] 기수 YAW0 ±5도, ; ' 기체 크기 x0.8/x1.25,
 --   , . 내려다보는 각도 TILT ±5도, PgUp PgDn 씬 zoom ±1. 맞춘 값을 HaloDropConfig.lua 의 HaloDrop.SKY 에 옮겨 적는다.
+--   기수 방향의 기본 식은 update() 참고 (315 + 차량 yaw). YAW0 는 그 위의 미세 보정.
 -- 호출: HaloDropJumper 가 board() 에서 open, 점프 수송기 확보(onPlaneAcquired) 또는 자유낙하 시작 때 close.
 --   점프 대기(JUMPING) 중엔 setCover(1).
 -- 시점: Viewpoint(1·3인칭) 여부와 무관하게 UI 로 그린다 (런 4 라운드 3 에서 Viewpoint 켠 채로 정상 표시 확인).
@@ -344,9 +345,12 @@ function HaloDropSky.update(x, y, headingDeg, dt)
     local r = math.rad(headingDeg)
     S.cx = x + math.cos(r) * K.LEAD
     S.cy = y + math.sin(r) * K.LEAD
-    -- 아이소 지도에서 월드 방향 (dx,dy) 의 화면 각도: 화면 x = dx - dy, 화면 y = (dx + dy)/2
-    local sx, sy = math.cos(r) - math.sin(r), (math.cos(r) + math.sin(r)) / 2
-    S.yaw = math.deg(math.atan2(sy, sx))
+    -- 기체 view yaw = 315 + 차량 yaw. 인게임 아이소 카메라는 viewRotation (30, 315, 0)(b42.21 TileGeometryUtils :20)이고
+    -- UI3DScene.calcMatrices(:2655) 는 rotateXYZ(view) 뒤에 객체 변환을 곱하므로 월드에서 yaw φ 로 setAngles 한 차량의
+    -- 모습 = 객체 0 + view yaw (315 + φ). 차량 yaw = HaloDropFlight.yaw = atan2(dx, dy) = 90 - headingDeg.
+    -- (런 5 까지의 화면투영각 식은 근거가 없었고 기수가 진행 방향과 안 맞았다)
+    S.yaw = 315 + (90 - headingDeg)
+    S.yaw = S.yaw - math.floor(S.yaw / 360) * 360
     -- 밤이면 타일을 어둡게 (바닐라 낮 밝기 0~1 을 TINT_NIGHT~1 로)
     local okD, day = pcall(function() return getClimateManager():getDayLightStrength() end)
     if okD and type(day) == "number" then

@@ -54,13 +54,15 @@ local function hideTick()
     local mine = me and HaloDrop.playerKey(me) or nil
     local want = HaloDrop.opt("HideCarried") and C.fl ~= nil and not C.ended
     local function shouldHide(k)
-        if not want or not C.aboard[k] then return false end
+        if not want then return false end
         if k == mine then
-            -- 뛰어내려 자유낙하가 시작되는 순간까지 숨긴다 (JUMPING 은 아직 구름 속)
+            -- 뛰어내려 자유낙하가 시작되는 순간까지 숨긴다. 서버는 Jumped 를 받자마자 Member aboard=false 를
+            -- 방송하므로(C.aboard 에서 빠짐) 자기 자신은 C.aboard 가 아니라 J.state 로만 판정한다
+            -- (런 5: E 직후 44ms 에 unhide 돼 수송기 접근 3초 동안 공중에 서 있는 모습이 그려졌다)
             local st = HaloDrop.J ~= nil and HaloDrop.J.state or nil
             return st == "ABOARD" or st == "JUMPING"
         end
-        return true
+        return C.aboard[k] ~= nil
     end
     -- 숨김 해제: 내린 사람, 라운드 끝, 옵션 끔
     for k, p in pairs(_hidden) do
