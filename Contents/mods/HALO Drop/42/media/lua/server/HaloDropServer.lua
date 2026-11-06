@@ -6,6 +6,10 @@
 --   클라: 자기 캐릭터의 위치·고도·낙하 속도 (HaloDropJumper.lua), 파일럿 클라의 차량 이동 (HaloDropPilot.lua)
 -- 수송기 차량은 퐁듀 좀비 공습 투하와 같은 방식이다: addVehicleDebug -> authorizationChanged(파일럿)
 --   -> 파일럿 클라가 매 틱 setWorldTransform. 서버 setWorldTransform 은 Bullet 이동을 하지 않는다.
+--   addVehicleDebug 직후엔 getId() 가 -1 일 수 있다(11-06 실측, 라운드 1) -> 틱마다 폴링해 붙으면 Pilot 재방송.
+-- 낙하산 착용·해제는 클라가 한다. B42 에서 착용 상태는 클라가 SyncClothing 으로 서버에 올리므로
+--   서버가 removeWornItem 해도 다음 동기화에서 되살아난다(11-06 실측: 착지 후 회수했는데 라운드 종료 때
+--   또 발견, 다음 라운드에 새로 지급되지 않음). 서버는 인벤토리 아이템 지급·회수만 맡는다.
 
 if isClient() then return end
 
@@ -53,6 +57,15 @@ local function toClients(cmd, args)
     end
 end
 
+-- 특정 플레이어에게만. SP 는 접속자가 하나라 방송과 같다
+local function toPlayer(p, cmd, args)
+    if isServer() then
+        sendServerCommand(p, HaloDrop.MODULE, cmd, args)
+    elseif HaloDrop.onServerCommand then
+        HaloDrop.onServerCommand(HaloDrop.MODULE, cmd, args)
+    end
+end
+
 local function aboardKeys()
     local keys = {}
     for k, m in pairs(R.members) do
@@ -74,40 +87,44 @@ local function flightArgs()
 end
 
 -- ── 낙하산 아이템 ─────────────────────────────────────────────────────────────
+-- 인벤토리에서 찾는다(착용 목록이 아니라). 클라가 벗은 뒤에도 인벤토리엔 남아 있다.
 local function findChute(p)
-    local worn = p:getWornItems()
-    if not worn then return nil end
-    for i = 0, worn:size() - 1 do
-        local it = worn:get(i):getItem()
-        if it and it:getFullType() == HaloDrop.CHUTE_ITEM then return it end
-    end
-    return nil
-end
-
--- 순서: 인벤토리 추가 -> 클라에 아이템 전송 -> 착용 (착용 시 서버가 SyncClothing 을 전체에 보낸다)
-local function chuteGive(p)
-    if findChute(p) then return end
-    local item = instanceItem(HaloDrop.CHUTE_ITEM)
-    if not item then
-        log("chute give FAILED: no item script " .. HaloDrop.CHUTE_ITEM)
-        return
-    end
     local inv = p:getInventory()
-    inv:AddItem(item)
-    sendAddItemToContainer(inv, item)
-    local ok, err = pcall(function() p:setWornItem(item:getBodyLocation(), item) end)
-    log("chute given to " .. tostring(p:getUsername()) .. " worn=" .. tostring(ok)
-        .. (ok and "" or (" err=" .. tostring(err))))
+    if not inv then return nil end
+    return inv:getFirstTypeRecurse(HaloDrop.CHUTE_ITEM)
 end
 
+-- 지급: 인벤토리 추가 -> 클라에 아이템 전송 -> 클라에 착용 지시(ChuteWear)
+local function chuteGive(p)
+    local item = findChute(p)
+    if not item then
+        item = instanceItem(HaloDrop.CHUTE_ITEM)
+        if not item then
+            log("chute give FAILED: no item script " .. HaloDrop.CHUTE_ITEM)
+            return
+        end
+        local inv = p:getInventory()
+        inv:AddItem(item)
+        sendAddItemToContainer(inv, item)
+        log("chute given to " .. tostring(p:getUsername()))
+    else
+        log("chute already in inventory of " .. tostring(p:getUsername()) .. " -> wear only")
+    end
+    toPlayer(p, "ChuteWear", { id = R and R.id or 0 })
+end
+
+-- 회수: 클라가 먼저 벗었다는 전제(Landed/Cleanup 은 클라가 벗은 뒤 보낸다). 혹시 남은 착용은 같이 푼다
 local function chuteTake(p, reason)
     local item = findChute(p)
     if not item then return end
-    pcall(function() p:removeWornItem(item) end)
+    local wornLoc = p:getWornItems():getLocation(item)
+    if wornLoc then pcall(function() p:removeWornItem(item) end) end
     local inv = item:getContainer() or p:getInventory()
     inv:Remove(item)
     sendRemoveItemFromContainer(inv, item)
-    log("chute removed from " .. tostring(p:getUsername()) .. " (" .. tostring(reason) .. ")")
+    local left = findChute(p)
+    log("chute removed from " .. tostring(p:getUsername()) .. " (" .. tostring(reason) .. ") wasWorn="
+        .. tostring(wornLoc ~= nil) .. " leftover=" .. tostring(left ~= nil))
 end
 
 -- ── 수송기 차량 ───────────────────────────────────────────────────────────────
@@ -136,7 +153,20 @@ end
 local function planeSpawn()
     local sq = getSquare(math.floor(R.fl.ax), math.floor(R.fl.ay), 0)
     if not sq then
-        log("plane spawn FAILED: square not loaded at A")
+        -- A 칸(구역 중심)이 서버에 안 올라와 있으면 탑승자 한 명 위치에서 스폰 (파일럿이 첫 틱에 A 로 옮긴다)
+        for k, _ in pairs(R.members) do
+            local p = findPlayer(k)
+            if p then
+                sq = getSquare(math.floor(p:getX()), math.floor(p:getY()), 0)
+                if sq then
+                    log("plane spawn: A square not loaded, using member square of " .. tostring(p:getUsername()))
+                    break
+                end
+            end
+        end
+    end
+    if not sq then
+        log("plane spawn FAILED: no loaded square at A or any member")
         return
     end
     local ok, v = pcall(function() return addVehicleDebug(HaloDrop.PLANE_SCRIPT, IsoDirections.N, 0, sq) end)
@@ -147,6 +177,20 @@ local function planeSpawn()
     R.vehicle = v
     R.vid = v:getId()
     log("plane spawned vid=" .. tostring(R.vid))
+    if R.vid < 0 then R.vid = nil end   -- 아직 id 없음 -> onTick 에서 폴링
+end
+
+-- addVehicleDebug 직후 id 가 -1 이면 붙을 때까지 기다렸다가 파일럿에게 알린다
+local function planePollId()
+    if not R or not R.vehicle or R.vid then return end
+    local ok, id = pcall(function() return R.vehicle:getId() end)
+    if ok and id and id >= 0 then
+        R.vid = id
+        log("plane id assigned vid=" .. tostring(R.vid))
+        local p = R.pilotKey and findPlayer(R.pilotKey) or nil
+        if p then pcall(function() R.vehicle:authorizationChanged(p) end) end
+        toClients("Pilot", { id = R.id, pilot = R.pilotKey, vid = R.vid })
+    end
 end
 
 -- 파일럿이 내리면 아직 탑승 중인 사람에게 넘긴다. 없으면 마지막 파일럿이 계속 몬다
@@ -180,6 +224,52 @@ local function inZone(zone, p)
     return x >= zone.x1 and x <= zone.x2 and y >= zone.y1 and y <= zone.y2
 end
 
+-- ── 경로 선정 ─────────────────────────────────────────────────────────────────
+-- 차량은 청크에 속해야 존재한다(BaseVehicle.update: 청크 참조가 비면 removeFromWorld). 맵 밖·빈 셀 위로
+-- 가면 수송기가 사라진다(11-06 실측: B 의 y 가 음수였고 물 위에서 기체 소실). 셀 존재는
+-- IsoMetaGrid.getCellData(셀X, 셀Y)(256칸 셀, 절대 좌표)로 본다.
+local PATH_STEP = 32          -- 경로를 이 간격으로 훑어 셀 존재 확인
+local PATH_TRIES = 16         -- 무작위 방향 시도 횟수
+local PATH_MIN = 200          -- 이보다 짧으면 경고
+
+local function cellExists(x, y)
+    local ok, cell = pcall(function()
+        return getWorld():getMetaGrid():getCellData(math.floor(x / 256), math.floor(y / 256))
+    end)
+    return ok and cell ~= nil
+end
+
+-- A 에서 angleDeg 방향으로 갈 수 있는 최대 길이(len 상한). 빈 셀을 만나면 그 직전까지
+local function usableLength(ax, ay, angleDeg, len)
+    local r = math.rad(angleDeg)
+    local dx, dy = math.cos(r), math.sin(r)
+    local d = PATH_STEP
+    while d <= len do
+        if not cellExists(ax + dx * d, ay + dy * d) then
+            return d - PATH_STEP
+        end
+        d = d + PATH_STEP
+    end
+    return len
+end
+
+local function pickFlight(ax, ay, len, speed)
+    local bestAng, bestLen = 0, -1
+    for _ = 1, PATH_TRIES do
+        local ang = ZombRand(360)
+        local l = usableLength(ax, ay, ang, len)
+        if l > bestLen then bestAng, bestLen = ang, l end
+        if bestLen >= len then break end
+    end
+    if bestLen < PATH_MIN then
+        log(string.format("WARNING: no map cells around A=(%.0f,%.0f): best path only %d tiles (angle %d)", ax, ay, bestLen, bestAng))
+    elseif bestLen < len then
+        log(string.format("path shortened to %d tiles (angle %d) to stay on existing map cells", bestLen, bestAng))
+    end
+    if bestLen < PATH_STEP then bestLen = PATH_STEP end
+    return HaloDropFlight.make(ax, ay, bestAng, bestLen, speed), bestAng, bestLen
+end
+
 -- ── 라운드 ────────────────────────────────────────────────────────────────────
 local function startRound(starter)
     if R then
@@ -187,17 +277,21 @@ local function startRound(starter)
         return
     end
     local speed = HaloDrop.opt("PlaneSpeed")
-    local len = HaloDrop.opt("PathLength")
-    local ang = ZombRand(360)
+    local zone = boardingZone()
+    -- A: 구역이 켜져 있으면 구역 중심(어드민이 어디서 발동하든 오일리그 위에서 출발), 아니면 발동한 사람 위치
+    local ax, ay = starter:getX(), starter:getY()
+    if zone then
+        ax, ay = (zone.x1 + zone.x2) / 2, (zone.y1 + zone.y2) / 2
+    end
+    local fl, ang, len = pickFlight(ax, ay, HaloDrop.opt("PathLength"), speed)
     _roundSeq = _roundSeq + 1
     R = {
         id = _roundSeq,
-        fl = HaloDropFlight.make(starter:getX(), starter:getY(), ang, len, speed),
+        fl = fl,
         startAt = nowMs() + HaloDrop.PREP_MS,
         members = {},
         ended = false,
     }
-    local zone = boardingZone()
     local n = 0
     local outside = {}
     for _, p in ipairs(players()) do
@@ -219,10 +313,25 @@ local function startRound(starter)
     log(string.format("round %d start by %s: A=(%.0f,%.0f) B=(%.0f,%.0f) angle=%d speed=%.1f len=%d dur=%dms members=%d",
         R.id, tostring(starter:getUsername()), R.fl.ax, R.fl.ay, R.fl.bx, R.fl.by, ang, speed, len, R.fl.durMs, n))
     planeSpawn()
-    R.pilotKey = HaloDrop.playerKey(starter)
-    if R.vehicle then
-        local ok, err = pcall(function() R.vehicle:authorizationChanged(starter) end)
-        if not ok then log("plane authorization FAILED err=" .. tostring(err)) end
+    -- 파일럿은 탑승자 중에서. 발동한 사람이 구역 밖이면 차량이 그 클라 범위에 없어 못 몬다
+    local pilot = nil
+    if R.members[HaloDrop.playerKey(starter)] then
+        pilot = starter
+    else
+        for k, _ in pairs(R.members) do
+            pilot = findPlayer(k)
+            if pilot then break end
+        end
+    end
+    if pilot then
+        R.pilotKey = HaloDrop.playerKey(pilot)
+        if R.vehicle then
+            local ok, err = pcall(function() R.vehicle:authorizationChanged(pilot) end)
+            if not ok then log("plane authorization FAILED err=" .. tostring(err)) end
+        end
+        if pilot ~= starter then log("pilot = " .. tostring(pilot:getUsername()) .. " (starter outside zone)") end
+    else
+        log("round " .. tostring(R.id) .. " has no pilot (no members)")
     end
     toClients("Flight", flightArgs())
 end
@@ -257,6 +366,7 @@ end
 local function onTick()
     if not R then return end
     local now = nowMs()
+    planePollId()
     if not R.ended and now - R.startAt > R.fl.durMs then
         endRound("path end")
     end

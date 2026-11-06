@@ -105,6 +105,8 @@ function HaloDrop.onServerCommand(module, command, args)
             C.id, C.fl.ax, C.fl.ay, C.fl.bx, C.fl.by, args.elapsed, C.fl.durMs, n, tostring(mine),
             tostring(amMember), tostring(C.pilotKey), tostring(C.vid)))
         if amMember and HaloDropJumper then HaloDropJumper.board() end
+    elseif command == "ChuteWear" then
+        if HaloDropJumper then HaloDropJumper.onChuteWear() end
     elseif args.id ~= C.id then
         return
     elseif command == "Member" then

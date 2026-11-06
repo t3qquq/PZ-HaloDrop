@@ -56,21 +56,21 @@ option HaloDrop.HideCarried = {
 }
 
 option HaloDrop.ZoneX1 = {
-    type = integer, min = 0, max = 100000, default = 0,
+    type = integer, min = 0, max = 100000, default = 19196,
     page = HaloDrop, translation = HaloDrop_ZoneX1,
 }
 
 option HaloDrop.ZoneY1 = {
-    type = integer, min = 0, max = 100000, default = 0,
+    type = integer, min = 0, max = 100000, default = 252,
     page = HaloDrop, translation = HaloDrop_ZoneY1,
 }
 
 option HaloDrop.ZoneX2 = {
-    type = integer, min = 0, max = 100000, default = 0,
+    type = integer, min = 0, max = 100000, default = 19231,
     page = HaloDrop, translation = HaloDrop_ZoneX2,
 }
 
 option HaloDrop.ZoneY2 = {
-    type = integer, min = 0, max = 100000, default = 0,
+    type = integer, min = 0, max = 100000, default = 292,
     page = HaloDrop, translation = HaloDrop_ZoneY2,
 }

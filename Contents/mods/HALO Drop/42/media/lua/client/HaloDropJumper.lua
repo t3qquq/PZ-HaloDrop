@@ -13,6 +13,8 @@
 --   그래서 여기서 정한 위치가 그 틱의 렌더 위치가 되고, 낙하 속도는 다음 틱 updateFalling 에 쓰인다.
 -- 안티치트: 차량 밖 캐릭터는 1초 평균 20 타일/초를 넘으면 위반이다(AntiCheatSpeed).
 --   수송기 속도·조향 속도 샌드박스 상한을 19 로 둔 이유.
+-- 낙하산 착용·해제는 여기(클라)서 한다. 서버는 아이템 지급(ChuteWear 지시)·회수만 한다 -- 착용 상태는
+--   클라 setWornItem 이 SyncClothing 으로 서버에 올리므로 서버가 벗겨도 되살아난다(11-06 실측).
 
 if isServer() then return end
 
@@ -46,6 +48,66 @@ local function planeSoundStop(p)
     pcall(function() p:getEmitter():stopSound(J.planeSnd) end)
     J.planeSnd = nil
 end
+
+-- ── 낙하산 착용·해제 (클라) ───────────────────────────────────────────────────
+local function findChute(p)
+    local inv = p:getInventory()
+    return inv and inv:getFirstTypeRecurse(HaloDrop.CHUTE_ITEM) or nil
+end
+
+local function chuteWear(p)
+    local item = findChute(p)
+    if not item then return false end
+    if p:getWornItems():getLocation(item) then return true end
+    local ok, err = pcall(function() p:setWornItem(item:getBodyLocation(), item) end)
+    log("chute wear ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err))))
+    return ok
+end
+
+-- 착용 목록에 있는 낙하산 전부 (인벤토리에서 이미 지워졌는데 착용 목록에만 남은 경우도 잡는다)
+local function wornChutes(p)
+    local out = {}
+    local worn = p:getWornItems()
+    if not worn then return out end
+    for i = 0, worn:size() - 1 do
+        local it = worn:get(i):getItem()
+        if it and it:getFullType() == HaloDrop.CHUTE_ITEM then out[#out + 1] = it end
+    end
+    return out
+end
+
+local function chuteUnwear(p, reason)
+    local items = wornChutes(p)
+    if #items == 0 then return end
+    for _, item in ipairs(items) do
+        local ok, err = pcall(function() p:removeWornItem(item) end)
+        log("chute unwear (" .. tostring(reason) .. ") ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err)))
+            .. " inInventory=" .. tostring(item:getContainer() ~= nil))
+    end
+end
+
+-- 서버 ChuteWear 는 sendAddItemToContainer 보다 먼저 도착할 수 있다 -> 아이템이 보일 때까지 몇 틱 재시도
+local _wearUntil = nil
+function HaloDropJumper.onChuteWear()
+    local p = getPlayer()
+    if not p then return end
+    if chuteWear(p) then return end
+    _wearUntil = getTimestampMs() + 3000
+    log("chute item not in inventory yet -> retrying up to 3s")
+end
+
+local function wearRetryTick()
+    if not _wearUntil then return end
+    local p = getPlayer()
+    if not p then return end
+    if chuteWear(p) then
+        _wearUntil = nil
+    elseif getTimestampMs() > _wearUntil then
+        _wearUntil = nil
+        log("chute wear FAILED: item never arrived")
+    end
+end
+Events.OnTick.Add(wearRetryTick)
 
 -- ── 위치 제어 ─────────────────────────────────────────────────────────────────
 -- setForceX/Y = x, next, last 동시 설정 (IsoMovingObject). setZ 는 lastZ 도 같이 정하고 31 로 자른다.
@@ -114,6 +176,7 @@ end
 local function land(p)
     local chute = J.state == "CANOPY"
     finish(p)
+    chuteUnwear(p, "landed")
     send(p, "Landed", { id = HaloDrop.C.id, chute = chute })
     log(string.format("landed at (%.1f,%.1f,%.1f) chute=%s", p:getX(), p:getY(), p:getZ(), tostring(chute)))
 end
@@ -225,6 +288,7 @@ local function onPlayerDeath(p)
     if p == getPlayer() and J.state then
         log("died during state " .. tostring(J.state))
         finish(p)
+        chuteUnwear(p, "death")
     end
 end
 Events.OnPlayerDeath.Add(onPlayerDeath)
@@ -237,15 +301,10 @@ local function cleanupTick()
     if not p then return end
     _cleanupDone = true
     Events.OnTick.Remove(cleanupTick)
-    local worn = p:getWornItems()
-    if not worn then return end
-    for i = 0, worn:size() - 1 do
-        local it = worn:get(i):getItem()
-        if it and it:getFullType() == HaloDrop.CHUTE_ITEM then
-            log("leftover parachute found -> cleanup")
-            send(p, "Cleanup", {})
-            return
-        end
+    if findChute(p) or #wornChutes(p) > 0 then
+        log("leftover parachute found -> cleanup")
+        chuteUnwear(p, "cleanup")
+        send(p, "Cleanup", {})
     end
 end
 Events.OnTick.Add(cleanupTick)
