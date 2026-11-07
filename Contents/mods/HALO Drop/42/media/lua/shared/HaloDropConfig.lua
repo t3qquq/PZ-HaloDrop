@@ -69,6 +69,16 @@ HaloDrop.DESCENT_Z = {
     CHUTE_FRAC = 0.5,   -- 낙하산 개방 고도에서 남겨 둘 비율 (0.5 = 캐노피 구간이 나머지 절반을 내려옴)
 }
 
+-- ── 강하 그림자 (HaloDropShadow.lua). 발밑 지면 칸에 검은 타원. 캐릭터와의 화면 간격이 남은 높이.
+HaloDrop.SHADOW = {
+    ENABLED      = true,
+    BODY_TILES   = 0.9,    -- 자유낙하 그림자 폭 (월드 칸)
+    CANOPY_TILES = 2.6,    -- 낙하산 그림자 폭 (월드 칸)
+    ALPHA_FAR    = 0.18,   -- FADE_FLOORS 층 이상 높이에서의 투명도
+    ALPHA_NEAR   = 0.55,   -- 지면 바로 위에서의 투명도
+    FADE_FLOORS  = 8,
+}
+
 -- ── 하강 줌 (HaloDropJumper descentZoom). 런 5: 실제 z 가 끝까지 CarryZ 라 고도가 변하는 시각 단서가 없었다.
 -- 뛰어내릴 때 옵션의 가장 먼 줌 레벨까지 빼고, 가상 고도가 ALT_NEAR 까지 내려오는 동안 원래 줌으로 당긴다.
 -- 바닐라 Tutorial(Steps.lua SneakStep.setZoom / Tutorial1.lua setZoomLevels)과 같은 경로:
