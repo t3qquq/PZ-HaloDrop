@@ -1,37 +1,42 @@
 VERSION = 1,
 
 option HaloDrop.PlaneSpeed = {
-    type = double, min = 5.0, max = 80.0, default = 48.0,
+    type = double, min = 5.0, max = 500.0, default = 200.0,
     page = HaloDrop, translation = HaloDrop_PlaneSpeed,
 }
 
 option HaloDrop.WorldX1 = {
-    type = integer, min = 0, max = 100000, default = 1500,
+    type = integer, min = 0, max = 100000, default = 0,
     page = HaloDrop, translation = HaloDrop_WorldX1,
 }
 
 option HaloDrop.WorldY1 = {
-    type = integer, min = 0, max = 100000, default = 800,
+    type = integer, min = 0, max = 100000, default = 0,
     page = HaloDrop, translation = HaloDrop_WorldY1,
 }
 
 option HaloDrop.WorldX2 = {
-    type = integer, min = 0, max = 100000, default = 15000,
+    type = integer, min = 0, max = 100000, default = 19968,
     page = HaloDrop, translation = HaloDrop_WorldX2,
 }
 
 option HaloDrop.WorldY2 = {
-    type = integer, min = 0, max = 100000, default = 13500,
+    type = integer, min = 0, max = 100000, default = 16128,
     page = HaloDrop, translation = HaloDrop_WorldY2,
 }
 
+option HaloDrop.AvoidEmptyNW = {
+    type = boolean, default = true,
+    page = HaloDrop, translation = HaloDrop_AvoidEmptyNW,
+}
+
 option HaloDrop.PlaneZ = {
-    type = integer, min = 1, max = 31, default = 6,
+    type = integer, min = 1, max = 31, default = 10,
     page = HaloDrop, translation = HaloDrop_PlaneZ,
 }
 
 option HaloDrop.CarryZ = {
-    type = integer, min = 1, max = 31, default = 3,
+    type = integer, min = 3, max = 31, default = 8,
     page = HaloDrop, translation = HaloDrop_CarryZ,
 }
 

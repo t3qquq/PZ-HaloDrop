@@ -302,7 +302,7 @@ end
 -- ── 경로 선정 ─────────────────────────────────────────────────────────────────
 -- 비행 박스(WorldX1~Y2) 를 가로지르는 무작위 직선. 박스 가운데 60% 안의 점 P 를 지나는 무작위 각도의
 -- 직선을 박스 테두리로 잘라 A(진입)·B(진출)로 쓴다. 길이가 박스 짧은 변의 절반보다 짧으면 다시 뽑는다.
-local PATH_TRIES = 16
+local PATH_TRIES = 48   -- AvoidEmptyNW 거부분까지 감안해 16 -> 48
 
 local function flightBox()
     local x1, y1 = HaloDrop.opt("WorldX1"), HaloDrop.opt("WorldY1")
@@ -332,19 +332,51 @@ local function clipLine(box, px, py, dx, dy)
     return px + dx * tmin, py + dy * tmin, px + dx * tmax, py + dy * tmax
 end
 
+-- 바닐라 B42 지도의 빈 북서쪽 (샌드박스 AvoidEmptyNW). 셀 = 256칸. 노란 영역:
+--   x < 45 이고 y < 18 인 직사각형 + x 45~58 에서 (45,3)-(58,0) 선 위쪽 삼각형 (t3 지도 캡처 11-08)
+local CELL = 256
+local function inEmptyNW(x, y)
+    local cx, cy = x / CELL, y / CELL
+    if cx < 45 and cy < 18 then return true end
+    if cx >= 45 and cx <= 58 and cy < 3 - 3 * (cx - 45) / 13 then return true end
+    return false
+end
+
+-- A→B 를 128칸 간격으로 훑어 빈 지역을 지나는지
+local function crossesEmptyNW(ax, ay, bx, by)
+    local len = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+    local n = math.max(1, math.ceil(len / 128))
+    for i = 0, n do
+        local t = i / n
+        if inEmptyNW(ax + (bx - ax) * t, ay + (by - ay) * t) then return true end
+    end
+    return false
+end
+
 local function pickFlight(speed)
     local box = flightBox()
     local w, h = box.x2 - box.x1, box.y2 - box.y1
     local minLen = math.min(w, h) * 0.5
-    local best = nil
+    local avoid = HaloDrop.opt("AvoidEmptyNW")
+    local best, rejected = nil, 0
     for _ = 1, PATH_TRIES do
         local px = box.x1 + w * (0.2 + ZombRand(600) / 1000)
         local py = box.y1 + h * (0.2 + ZombRand(600) / 1000)
         local r = math.rad(ZombRand(360))
         local ax, ay, bx, by = clipLine(box, px, py, math.cos(r), math.sin(r))
         local fl = HaloDropFlight.makeAB(ax, ay, bx, by, speed)
-        if not best or fl.length > best.length then best = fl end
-        if fl.length >= minLen then break end
+        if avoid and crossesEmptyNW(ax, ay, bx, by) then
+            rejected = rejected + 1
+            -- 빈 지역을 지나는 경로는 길이와 무관하게 후보에서 뺀다. 전부 걸리면 마지막 것이라도 쓴다
+            if not best then best = fl; best.emptyNW = true end
+        else
+            if not best or best.emptyNW or fl.length > best.length then best = fl; best.emptyNW = nil end
+            if fl.length >= minLen then break end
+        end
+    end
+    if rejected > 0 then
+        log(string.format("flight path: %d candidate(s) rejected for crossing empty NW%s", rejected,
+            best.emptyNW and " -- ALL rejected, using one anyway" or ""))
     end
     return best, box
 end

@@ -8,8 +8,9 @@
 --   FREEFALL  가상 고도를 수직 속도로 줄인다. 상호작용 키로 낙하산
 --   CANOPY    낙하산. 수직·수평 속도가 캐노피 목표치로 서서히 수렴한다
 -- 실제 z 처리 (HaloDropConfig.lua 고도 체계 참고)
---   붙잡기(hold): 가상 고도가 CarryZ 층보다 높은 동안. 매 틱 x, y, z 를 직접 정하고 낙하 속도를 0 으로 둔다.
---   놓기(release): 가상 고도가 CarryZ 층 아래로 내려오면 엔진 낙하(IsoGameCharacter.updateFalling)에
+--   붙잡기(hold): 가상 고도가 LOW_Z(3) 층보다 높은 동안. 매 틱 x, y 를 직접 정하고 z 는 visualZ(가상 고도)
+--     -- 뛰어내릴 때 CarryZ(기본 8), 낙하산 개방 고도에서 그 중간, LOW_Z 까지 선형 -- 로 끌어내리며 낙하 속도를 0 으로 둔다.
+--   놓기(release): 가상 고도가 LOW_Z 층 아래로 내려오면 엔진 낙하(IsoGameCharacter.updateFalling)에
 --     맡기고 낙하 속도만 매 틱 setLastFallSpeed 로 정한다. 바닥 BRAKE_H 층 위부터 LAND_SPEED 로 감속.
 --     updateFalling 은 중력을 더하는 등가속도이고 착지 피해는 충돌 순간 속도로만 정한다.
 -- 순서: IsoGameCharacter.update(updateFalling 포함)가 먼저 돌고 OnPlayerUpdate 가 뒤에 발화한다(IsoPlayer).
@@ -48,8 +49,35 @@ local function send(p, cmd, args)
     sendClientCommand(p, HaloDrop.MODULE, cmd, args)
 end
 
+-- 엔진 낙하로 넘기는 가상 고도. 하강 z(DESCENT_Z) 를 쓰면 LOW_Z 층, 아니면 CarryZ 층
+local function lowZ()
+    local D = HaloDrop.DESCENT_Z
+    if D and D.ENABLED then return math.min(D.LOW_Z, HaloDrop.opt("CarryZ")) end
+    return HaloDrop.opt("CarryZ")
+end
 local function carryAltM()
-    return HaloDrop.opt("CarryZ") * HaloDrop.M_PER_FLOOR
+    return lowZ() * HaloDrop.M_PER_FLOOR
+end
+
+-- 가상 고도 -> 붙잡아 둘 실제 z (HaloDrop.DESCENT_Z). 구간별 선형:
+--   JumpAltitude 에서 CarryZ, AutoOpenAltitude 에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC, lowAltM 에서 LOW_Z.
+--   런 6: z 가 끝까지 CarryZ(3) 라 "둥둥 떠 있는" 느낌 -> 마지막 7m(엔진 낙하)에서만 내려가는 게 보였다.
+--   엔진은 current 칸을 z 아래로 내려가며 찾으므로(IsoMovingObject.findCurrentGridSquare) 공중 칸은
+--   airFill 이 만든다. 1층 = 화면 약 96px.
+local function visualZ(alt)
+    local carry = HaloDrop.opt("CarryZ")
+    local D = HaloDrop.DESCENT_Z
+    if not D or not D.ENABLED then return carry end
+    local low = lowZ()
+    local top = HaloDrop.opt("JumpAltitude")
+    local mid = HaloDrop.opt("AutoOpenAltitude")
+    local lowAlt = low * HaloDrop.M_PER_FLOOR
+    if mid <= lowAlt or mid >= top then mid = (top + lowAlt) / 2 end
+    local zMid = low + (carry - low) * D.CHUTE_FRAC
+    if alt >= top then return carry end
+    if alt >= mid then return zMid + (carry - zMid) * (alt - mid) / (top - mid) end
+    if alt >= lowAlt then return low + (zMid - low) * (alt - lowAlt) / (mid - lowAlt) end
+    return low
 end
 
 -- ── 소리 (자기 캐릭터 emitter, 로컬 재생) ───────────────────────────────────
@@ -625,9 +653,9 @@ local function onPlayerUpdate(p)
     descentZoomTick()
 
     if not J.released and J.alt - J.vz * dt > carryAltM() then
-        -- 붙잡기: 가상 고도만 줄인다
+        -- 붙잡기: 가상 고도를 줄이고 실제 z 는 visualZ 로 따라 내린다 (DESCENT_Z 꺼져 있으면 CarryZ 고정)
         J.alt = J.alt - J.vz * dt
-        hold(p, J.x, J.y, carryZ)
+        hold(p, J.x, J.y, visualZ(J.alt))
     else
         if not J.released then
             J.released = true

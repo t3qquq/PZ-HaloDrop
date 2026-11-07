@@ -2,11 +2,11 @@
 --
 -- 고도 체계
 --   가상 고도(m): 탑승·자유낙하의 "진짜" 높이. 화면에는 고도계로만 보인다.
---   실제 z(층): 캐릭터가 실제로 있는 층. CarryZ 를 넘지 않는다.
---     카메라는 캐릭터 z 를 따라가고(PlayerCamera / calculateCameraZ) 청크는 x, y 기준으로만
---     로드되므로(IsoChunkMap.ProcessChunkPos) 실제 z 를 높이 올리면 화면 중심 지면이
---     로드 범위(기본 +-52칸) 밖으로 밀린다. 1층당 x, y 각 3칸.
---   가상 고도가 CarryZ x M_PER_FLOOR 아래로 내려온 뒤에만 실제 z 가 따라 내려간다.
+--   실제 z(층): 캐릭터가 실제로 있는 층. 뛰어내릴 때 CarryZ, 이후 가상 고도에 맞춰 DESCENT_Z.LOW_Z(3) 까지
+--     내려오고(HaloDropJumper visualZ), 그 아래는 엔진 낙하. 카메라는 캐릭터 z 를 따라가고
+--     (PlayerCamera / calculateCameraZ) 청크는 x, y 기준으로만 로드되므로(IsoChunkMap.ProcessChunkPos)
+--     실제 z 를 높이 올리면 화면 중심 지면이 로드 범위 밖으로 밀린다. 1층당 x, y 각 3칸.
+--     로드 창 폭은 해상도로 정해진다(IsoChunkMap.CalcChunkWidth: 1080p 13, 1440p 이상 19 청크 = +-72칸).
 
 HaloDrop = HaloDrop or {}
 
@@ -58,13 +58,24 @@ HaloDrop.AIR_FILL = {
     PER_TICK = 8,   -- 틱당 만드는 청크층 수 (64칸씩). 7x7x3층 = 147 -> 약 19틱 (런 5: 4 에서 올림)
 }
 
+-- ── 하강 z (HaloDropJumper visualZ). 런 6: 실제 z 가 CarryZ(3) 고정이라 고도 변화가 안 보였고, 마지막 7m
+-- (엔진 낙하, z 3->0) 만 떨어지는 느낌이 났다. 그래서 뛰어내리는 z 를 CarryZ(기본 8)로 올리고 가상 고도에 맞춰
+-- LOW_Z 까지 끌어내린다. 낙하산 개방 고도(AutoOpenAltitude)에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC.
+-- 공중 칸은 airFill 이 1~z 층에 만든다 (엔진 current 칸 탐색은 z 아래로 내려가며 첫 칸을 잡으므로
+-- 칸이 없으면 지면 칸이 current 가 되고, 그 칸이 화면 밖이면 캐릭터가 안 그려진다 - IsoGridSquare.IsOnScreen).
+HaloDrop.DESCENT_Z = {
+    ENABLED    = true,
+    LOW_Z      = 3,     -- 이 층 아래는 엔진 낙하 (런 3~6 검증 구간)
+    CHUTE_FRAC = 0.5,   -- 낙하산 개방 고도에서 남겨 둘 비율 (0.5 = 캐노피 구간이 나머지 절반을 내려옴)
+}
+
 -- ── 하강 줌 (HaloDropJumper descentZoom). 런 5: 실제 z 가 끝까지 CarryZ 라 고도가 변하는 시각 단서가 없었다.
 -- 뛰어내릴 때 옵션의 가장 먼 줌 레벨까지 빼고, 가상 고도가 ALT_NEAR 까지 내려오는 동안 원래 줌으로 당긴다.
 -- 바닐라 Tutorial(Steps.lua SneakStep.setZoom / Tutorial1.lua setZoomLevels)과 같은 경로:
 -- setZoomLevels 로 촘촘한 레벨 목록을 깔고 doZoomScroll 로 한 단계씩 옮긴다(MultiTextureFBO2 가 프레임당 0.02 씩 보간).
 -- 착지·종료 때 옵션 문자열(getOptionZoomLevels1x/2x, "250;225;..." %)로 원래 목록을 되돌린다. ENABLED false 면 끔.
 HaloDrop.DESCENT_ZOOM = {
-    ENABLED  = true,
+    ENABLED  = false,  -- 런 6: 2.5->0.75 로 당겨도 "떠 있는" 느낌은 그대로였고, DESCENT_Z 의 z 간격 변화와 서로 상쇄된다
     STEP     = 0.05,   -- 레벨 간격(줌 배율). 작을수록 매끄럽다
     ALT_NEAR = 80,     -- 이 가상 고도(m) 아래서는 원래 줌
 }
