@@ -1,13 +1,11 @@
-# Halo Drop 하늘 뷰 타일용 pzmap2dzi 설정 (blind-coder/pzmap2dzi, B42)
-# 사용: pzmap2dzi 폴더의 conf/conf.yaml 을 이 파일로, conf/mod/halodrop.txt 를 mod/halodrop.txt 로 덮어쓴 뒤
-#   python main.py copy
-#   python main.py unpack
-#   python main.py render base
-# 출력: E:/pzmap/html/base (바닐라), E:/pzmap/html/mod_maps/OilRig/base (리그). 그 다음 tools/make_sky_tiles.py.
+# Halo Drop 하늘 뷰 타일용 pzmap2dzi 설정 (cff29546/pzmap2dzi 1.1.17, B42.21 lotpack v1 파서 확인 11-08)
+# 사용: 이 파일을 pzmap2dzi 폴더의 conf/conf.yaml 로, mod/halodrop.txt 를 conf/mod/halodrop.txt 로 복사한 뒤
+#   run_halodrop.bat (= python main.py deploy / unpack / render base)
+# 출력: E:/pzmap/html/map_data/base (바닐라), E:/pzmap/html/map_data/mod_maps/OilRig/base (리그). 그 다음 tools/make_sky_tiles.py.
 pz_root: |-
     E:/Steam/steamapps/common/ProjectZomboid
 
-output_path: |-
+output_root: |-
     E:/pzmap
 
 mod_root: |-
@@ -16,27 +14,46 @@ mod_root: |-
 custom_root: |-
     .
 
-map_conf_default: default.txt
+save_game_root: |-
+    %UserProfile%/zomboid/Saves
+
+output_entry: default
+output_route: map_data/
+
+map_conf_default: default_b42.txt
 map_conf:
     - vanilla.txt
     - mod/
 
-use_depend_texture_only: false
+use_depend_texture_only: true   # 바닐라 텍스처만 푼다 (conf/mod 의 다른 모드 목록 무시)
 
 base_map: default
 mod_maps:
     - OilRig
 
+save_games: []
+
 render_conf:
     verbose: true
     profile: false
-    worker_count: 6          # i5-9600K 6코어
+    # i5-9600K 6코어 / 16GB: 워커 5 (워커당 ~500MB + 공유 4GB + 캐시 3GB ≈ 10GB)
+    worker_count: 5
     break_key: ''
 
     tile_size: 1024
-    # 지상 + 4층까지. 4 px/칸 이하 축척에선 그 위 층은 거의 안 보인다
+    tile_align_levels: 3
+    # 지상 + 4층. 4 px/칸 이하 축척에선 그 위 층은 안 보인다. 지하는 안 그림
     layer_range: [0, 5]
-    # 고운 5레벨(128,64,32,16,8 px/칸)은 디스크에 안 쓴다 -> 4, 2, 1 px/칸부터 남는다
+    hash_method: null
+    # 바닐라 B42 지도 범위 (리그 셀 75,1 은 세 번째 사각형 안)
+    dzi_cell_range[default]:
+        - [0, 18, 45, 45]
+        - [45, 3, 13, 60]
+        - [58, 0, 20, 63]
+    dzi_cell_range: auto
+    render_cell_range: all
+
+    # 고운 5레벨(128,64,32,16,8 px/칸)은 디스크에 안 쓴다 -> 4, 2, 1 px/칸부터 남는다 (enable_cache 필요)
     omit_levels: 5
 
     image_fmt: webp
@@ -44,9 +61,9 @@ render_conf:
     image_save_options:
         jpg: {quality: 90}
 
-    # omit_levels 가 디스크 쓰기를 건너뛰려면 캐시가 켜져 있어야 한다 (python 3.8+). 메모리 상한 MB
+    # 공유 메모리 캐시: python 3.11.1+ 필요. 렌더가 죽으면 false 로 (그러면 고운 레벨을 썼다 지우므로 느리고 SSD 쓰기 많음)
     enable_cache: true
-    cache_limit_mb: 6000
+    cache_limit_mb: 3000
     top_view_square_size: 1
 
     plants_conf:
@@ -56,14 +73,23 @@ render_conf:
         season: summer2
         tree_size: 2
         jumbo_tree_size: 4
-        jumbo_tree_type: 0
+        jumbo_tree_type: 1
         no_ground_cover: false
-        unify_tree_type: -1
+        unify_tree_type: 0
 
+    texture_filters: []
     top_view_color_mode: avg
     default_font: arial.ttf
     default_font_size: 20
     zombie_count: false
-    vehicle: false
-    special_zombie: false
-    story: false
+    use_mark: true
+    foraging_color_default: Gray
+    foraging_color: {}
+    objects_color_default: White
+    objects_color: {}
+    streets_large:  White
+    streets_medium: Cyan
+    streets_small:  Teal
+    save_game_parser_tag: latest
+    save_game_parser_path:
+    save_game_dump_failed_chunks: false
