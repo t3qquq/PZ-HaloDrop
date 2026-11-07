@@ -1,7 +1,10 @@
 -- Halo Drop 강하 그림자: 자유낙하·낙하산 중 캐릭터 발밑 지면 칸 위치에 그림자를 그린다.
 -- 캐릭터(z 층)와 그림자(지면)의 화면 간격 = 남은 높이. 하강 z(DESCENT_Z)와 함께 "얼마나 남았나"를 보여주는 단서.
 -- 그리기: OnPreUIDraw(월드 뒤·UI 앞) 에서 isoToScreenX/Y(playerNum, x, y, 지면 z) 로 화면 좌표를 얻어
---   getRenderer():render(tex, x, y, w, h, r, g, b, a) (바닐라 GridSquareSelector.lua 와 같은 호출) 로 검게 곱해 그린다.
+--   UIManager.DrawTexture(tex, x, y, w, h, alpha) 로 그린다 (텍스처 자체가 검은 타원).
+--   런 7: getRenderer():render(tex,x,y,w,h,r,g,b,a) 는 b42.21 에 없다 -- SpriteRenderer.render 는 10번째 인자
+--   Consumer<TextureDraw> 가 붙어 "No implementation found" 로 매 프레임 예외(1262건). 바닐라 GridSquareSelector.lua 의
+--   9인자 호출은 B41 잔재.
 -- 지면 z: 캐릭터 아래로 내려가며 바닥이 있는 첫 칸(TreatAsSolidFloor / hasFloor). 없으면 0.
 -- 크기: 월드 1칸의 화면 폭(isoToScreenX 두 점 차이) 기준이라 줌과 무관. 낙하산이면 CANOPY_TILES, 아니면 BODY_TILES.
 -- 투명도: 지면에서 FADE_FLOORS 층 이상이면 ALPHA_FAR, 가까울수록 ALPHA_NEAR.
@@ -51,6 +54,6 @@ local function onPreUIDraw()
     local hh = w * 0.5
     local t = math.max(0, 1 - h / S.FADE_FLOORS)
     local a = S.ALPHA_FAR + (S.ALPHA_NEAR - S.ALPHA_FAR) * t
-    getRenderer():render(tex, sx - w / 2, sy - hh / 2, w, hh, 0, 0, 0, a)
+    UIManager.DrawTexture(tex, sx - w / 2, sy - hh / 2, w, hh, a)
 end
 Events.OnPreUIDraw.Add(onPreUIDraw)

@@ -15,7 +15,7 @@
   "Sandbox_HaloDrop_PlaneZ": "Plane flight level (floors)",
   "Sandbox_HaloDrop_PlaneZ_tooltip": "The real floor the jump plane vehicle flies at. About 2 floors above CarryZ looks best. Too high and it leaves the screen when zoomed in.",
   "Sandbox_HaloDrop_CarryZ": "Jump height (floors)",
-  "Sandbox_HaloDrop_CarryZ_tooltip": "The real floor the character is on when jumping. During the fall it descends with the virtual altitude from this floor to floor 3 (halfway at the parachute altitude); below floor 3 the engine fall takes over. Each floor is about 96px on screen, so when zoomed in the ground below leaves the screen; about 8 recommended. Empty squares are created on floors 1..this in nearby chunks (air fill), so higher costs more.",
+  "Sandbox_HaloDrop_CarryZ_tooltip": "The real floor the character is on when jumping (3-12). During the fall it descends with the virtual altitude from this floor to floor 3 (halfway at the parachute altitude); below floor 3 the engine fall takes over. Each floor is about 96px on screen, so when zoomed in the ground below leaves the screen; 8 recommended. Empty squares are created on floors 1..this in nearby chunks (air fill), so higher is heavier: 16 and 31 froze frames for tens of seconds and the whole fall was black (run 7).",
   "Sandbox_HaloDrop_JumpAltitude": "Jump altitude (m)",
   "Sandbox_HaloDrop_JumpAltitude_tooltip": "Virtual altitude at the jump. Sets how long the free fall lasts.",
   "Sandbox_HaloDrop_FreefallSpeed": "Free fall max descent speed (m/s)",

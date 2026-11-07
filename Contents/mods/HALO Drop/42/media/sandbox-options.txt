@@ -36,7 +36,7 @@ option HaloDrop.PlaneZ = {
 }
 
 option HaloDrop.CarryZ = {
-    type = integer, min = 3, max = 31, default = 8,
+    type = integer, min = 3, max = 12, default = 8,
     page = HaloDrop, translation = HaloDrop_CarryZ,
 }
 

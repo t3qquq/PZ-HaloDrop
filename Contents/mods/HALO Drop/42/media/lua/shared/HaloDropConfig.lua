@@ -63,6 +63,7 @@ HaloDrop.AIR_FILL = {
 -- LOW_Z 까지 끌어내린다. 낙하산 개방 고도(AutoOpenAltitude)에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC.
 -- 공중 칸은 airFill 이 1~z 층에 만든다 (엔진 current 칸 탐색은 z 아래로 내려가며 첫 칸을 잡으므로
 -- 칸이 없으면 지면 칸이 current 가 되고, 그 칸이 화면 밖이면 캐릭터가 안 그려진다 - IsoGridSquare.IsOnScreen).
+HaloDrop.CARRY_Z_MAX = 12   -- 샌드박스 CarryZ 상한 (런 7: 16·31 은 airFill 폭증 + 로드 창 이탈로 검정·프레임 정지)
 HaloDrop.DESCENT_Z = {
     ENABLED    = true,
     LOW_Z      = 3,     -- 이 층 아래는 엔진 낙하 (런 3~6 검증 구간)

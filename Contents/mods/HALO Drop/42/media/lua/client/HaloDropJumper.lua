@@ -49,11 +49,27 @@ local function send(p, cmd, args)
     sendClientCommand(p, HaloDrop.MODULE, cmd, args)
 end
 
+-- 뛰어내리는 실제 층. 샌드박스 CarryZ 를 CARRY_Z_MAX 로 자른다.
+-- 런 7: 31·16 으로 돌리자 airFill 이 50만 칸을 만들고(7878 청크층) 프레임이 수십 초씩 멈췄으며 낙하 내내 화면이 검었다.
+-- 카메라는 1층당 3칸 북서로 밀려 16층이면 48칸, 31층이면 93칸 -- 로드 창(±72칸)을 벗어난다.
+local function carryZ()
+    local v = HaloDrop.opt("CarryZ")
+    local cap = HaloDrop.CARRY_Z_MAX or 12
+    if v > cap then
+        if not HaloDrop._carryZWarned then
+            HaloDrop._carryZWarned = true
+            log(string.format("CarryZ %d capped to %d (CARRY_Z_MAX)", v, cap))
+        end
+        return cap
+    end
+    return v
+end
+
 -- 엔진 낙하로 넘기는 가상 고도. 하강 z(DESCENT_Z) 를 쓰면 LOW_Z 층, 아니면 CarryZ 층
 local function lowZ()
     local D = HaloDrop.DESCENT_Z
-    if D and D.ENABLED then return math.min(D.LOW_Z, HaloDrop.opt("CarryZ")) end
-    return HaloDrop.opt("CarryZ")
+    if D and D.ENABLED then return math.min(D.LOW_Z, carryZ()) end
+    return carryZ()
 end
 local function carryAltM()
     return lowZ() * HaloDrop.M_PER_FLOOR
@@ -65,7 +81,7 @@ end
 --   엔진은 current 칸을 z 아래로 내려가며 찾으므로(IsoMovingObject.findCurrentGridSquare) 공중 칸은
 --   airFill 이 만든다. 1층 = 화면 약 96px.
 local function visualZ(alt)
-    local carry = HaloDrop.opt("CarryZ")
+    local carry = carryZ()
     local D = HaloDrop.DESCENT_Z
     if not D or not D.ENABLED then return carry end
     local low = lowZ()
@@ -465,7 +481,7 @@ local function startJump(p, reason)
     airFillReset()
     HaloDropSky.setCover(1)
     send(p, "Jumped", { id = C.id, reason = reason, x = math.floor(x), y = math.floor(y) })
-    hold(p, x, y, HaloDrop.opt("CarryZ"))
+    hold(p, x, y, carryZ())
     log(string.format("jump start (%s): moved to route (%.0f,%.0f) frac=%.3f, waiting for ground (max %ds)",
         reason, x, y, HaloDropFlight.frac(C.fl, now - C.t0), HaloDrop.opt("JumpWaitMax")))
 end
@@ -547,7 +563,7 @@ local function onPlayerUpdate(p)
     if dt < 0 then dt = 0 elseif dt > 0.25 then dt = 0.25 end
     J.lastTs = now
     p:setBlockMovement(true)
-    local carryZ = HaloDrop.opt("CarryZ")
+    local carry = carryZ()
 
     -- 1초 주기 상태 로그 (실시간 검증용)
     if not J.nextLog or now >= J.nextLog then
@@ -581,7 +597,7 @@ local function onPlayerUpdate(p)
     if J.state == "JUMPING" then
         local C = HaloDrop.C
         local jp = J.jump
-        hold(p, J.x, J.y, carryZ)
+        hold(p, J.x, J.y, carry)
         local fx, fy = 1, 0
         if C.fl then fx, fy = HaloDropFlight.dir(C.fl) end
         p:setForwardDirection(fx, fy)
