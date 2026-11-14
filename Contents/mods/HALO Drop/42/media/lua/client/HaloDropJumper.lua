@@ -9,7 +9,7 @@
 --   CANOPY    낙하산. 수직·수평 속도가 캐노피 목표치로 서서히 수렴한다
 -- 실제 z 처리 (HaloDropConfig.lua 고도 체계 참고)
 --   붙잡기(hold): 가상 고도가 LOW_Z(3) 층보다 높은 동안. 매 틱 x, y 를 직접 정하고 z 는 visualZ(가상 고도)
---     -- 뛰어내릴 때 CarryZ(기본 8), 낙하산 개방 고도에서 그 중간, LOW_Z 까지 선형 -- 로 끌어내리며 낙하 속도를 0 으로 둔다.
+--     -- 뛰어내릴 때 CarryZ(기본 31, Viewpoint 전용)에서 LOW_Z 까지 가상 고도에 비례해 -- 끌어내리며 낙하 속도를 0 으로 둔다.
 --   놓기(release): 가상 고도가 LOW_Z 층 아래로 내려오면 엔진 낙하(IsoGameCharacter.updateFalling)에
 --     맡기고 낙하 속도만 매 틱 setLastFallSpeed 로 정한다. 바닥 BRAKE_H 층 위부터 LAND_SPEED 로 감속.
 --     updateFalling 은 중력을 더하는 등가속도이고 착지 피해는 충돌 순간 속도로만 정한다.
@@ -54,7 +54,7 @@ end
 -- 카메라는 1층당 3칸 북서로 밀려 16층이면 48칸, 31층이면 93칸 -- 로드 창(±72칸)을 벗어난다.
 local function carryZ()
     local v = HaloDrop.opt("CarryZ")
-    local cap = HaloDrop.CARRY_Z_MAX or 12
+    local cap = HaloDrop.CARRY_Z_MAX or 31
     if v > cap then
         if not HaloDrop._carryZWarned then
             HaloDrop._carryZWarned = true
@@ -76,7 +76,8 @@ local function carryAltM()
 end
 
 -- 가상 고도 -> 붙잡아 둘 실제 z (HaloDrop.DESCENT_Z). 구간별 선형:
---   JumpAltitude 에서 CarryZ, AutoOpenAltitude 에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC, lowAltM 에서 LOW_Z.
+--   기본(PROPORTIONAL): JumpAltitude 에서 CarryZ, lowAltM 에서 LOW_Z 를 한 직선으로.
+--   PROPORTIONAL false: JumpAltitude 에서 CarryZ, AutoOpenAltitude 에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC, lowAltM 에서 LOW_Z.
 --   런 6: z 가 끝까지 CarryZ(3) 라 "둥둥 떠 있는" 느낌 -> 마지막 7m(엔진 낙하)에서만 내려가는 게 보였다.
 --   엔진은 current 칸을 z 아래로 내려가며 찾으므로(IsoMovingObject.findCurrentGridSquare) 공중 칸은
 --   airFill 이 만든다. 1층 = 화면 약 96px.
@@ -88,12 +89,50 @@ local function visualZ(alt)
     local top = HaloDrop.opt("JumpAltitude")
     local mid = HaloDrop.opt("AutoOpenAltitude")
     local lowAlt = low * HaloDrop.M_PER_FLOOR
+    if alt >= top then return carry end
+    if alt <= lowAlt then return low end
+    if D.PROPORTIONAL then
+        -- 한 직선: 층당 미터가 자유낙하·캐노피 구간에서 같다 -> 화면 하강 속도 비율 = 실제 속도 비율
+        return low + (carry - low) * (alt - lowAlt) / (top - lowAlt)
+    end
     if mid <= lowAlt or mid >= top then mid = (top + lowAlt) / 2 end
     local zMid = low + (carry - low) * D.CHUTE_FRAC
     if alt >= top then return carry end
     if alt >= mid then return zMid + (carry - zMid) * (alt - mid) / (top - mid) end
     if alt >= lowAlt then return low + (zMid - low) * (alt - lowAlt) / (mid - lowAlt) end
     return low
+end
+
+-- ── 시점 확인 (CarryZ 31 은 Viewpoint 1·3인칭 전제) ─────────────────────────
+-- Viewpoint.View.next() 는 "다음" 시점 이름: "first"=지금 아이소, "third"=지금 1인칭, "isometric"=지금 3인칭.
+-- 전역 Viewpoint 가 없으면 아이소. 자바 호출이라 1초 간격으로만 본다.
+local function currentView()
+    local ok, n = pcall(function()
+        if Viewpoint and Viewpoint.View and Viewpoint.View.next then return Viewpoint.View.next() end
+        return nil
+    end)
+    if not ok then return "isometric(err)" end
+    if n == nil or n == "first" then return "isometric" end
+    if n == "third" then return "first" end
+    if n == "isometric" then return "third" end
+    return "unknown:" .. tostring(n)
+end
+
+local function viewCheck(where, force)
+    local now = getTimestampMs()
+    if not force and J.viewNext and now < J.viewNext then return end
+    J.viewNext = now + 1000
+    local v = currentView()
+    if v == J.view and not force then return end
+    J.view = v
+    local z = carryZ()
+    local iso = string.sub(v, 1, 9) == "isometric"
+    if iso and z > (HaloDrop.ISO_SAFE_Z or 12) then
+        log(string.format("WARNING view=%s at %s with CarryZ %d (> ISO_SAFE_Z %d): expect black screen / frame stalls, use Viewpoint 1st/3rd person",
+            v, where, z, HaloDrop.ISO_SAFE_Z or 12))
+    else
+        log(string.format("view=%s at %s (CarryZ %d)", v, where, z))
+    end
 end
 
 -- ── 소리 (자기 캐릭터 emitter, 로컬 재생) ───────────────────────────────────
@@ -297,7 +336,8 @@ local function airFill(p)
                 if math.max(math.abs(wx - cx), math.abs(wy - cy)) == r then
                     -- 이 청크가 클라에 올라와 있을 때만 (0층 칸 존재)
                     if cell:getGridSquare(wx * 8, wy * 8, 0) ~= nil then
-                        for z = 1, pz do
+                        -- 위층부터: 엔진 current 칸 탐색은 z 에서 아래로 내려가므로 캐릭터 층 칸이 먼저 있어야 한다
+                        for z = pz, 1, -1 do
                             local key = wx .. "," .. wy .. "," .. z
                             if not _air.done[key] then
                                 if budget <= 0 then return end
@@ -479,6 +519,8 @@ local function startJump(p, reason)
     J.x, J.y = x, y
     J.jump = { at = now, groundAt = nil, planeSeen = false, reason = reason }
     airFillReset()
+    J.view = nil
+    viewCheck("jump start", true)
     HaloDropSky.setCover(1)
     send(p, "Jumped", { id = C.id, reason = reason, x = math.floor(x), y = math.floor(y) })
     hold(p, x, y, carryZ())
@@ -622,6 +664,7 @@ local function onPlayerUpdate(p)
 
     -- ── 강하 모델 ──
     airFill(p)
+    if not J.released then viewCheck("descent") end   -- 강하 중 시점 전환 감지 (바뀔 때만 로그)
     local canopy = J.state == "CANOPY"
     local turnRate = canopy and HaloDrop.opt("CanopyTurnRate") or HaloDrop.opt("FreefallTurnRate")
     local accel = canopy and HaloDrop.opt("CanopyAccel") or HaloDrop.opt("FreefallAccel")

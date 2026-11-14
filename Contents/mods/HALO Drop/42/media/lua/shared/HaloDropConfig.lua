@@ -54,20 +54,33 @@ HaloDrop.CP = {
 
 -- ── 공중 칸 채우기 (HaloDropJumper airFill). 런 4 쿼터뷰 검정 화면 실험. CHUNKS 0 이면 끔 ──────
 HaloDrop.AIR_FILL = {
-    CHUNKS   = 3,   -- 플레이어 청크 기준 반경(청크). 3 = 7x7 청크 = ±24칸
+    -- 플레이어 청크 기준 반경(청크). 1 = 3x3 청크 = ±8칸. 아이소 검정 화면 실험 때는 3(7x7)이었으나
+    -- CarryZ 31 에선 7x7x31 = 1519 청크층(런 7 폭증 구간). Viewpoint 는 자체 렌더라 발밑 current 칸(엔진 로직)만
+    -- 있으면 되므로 경계 넘김 대비 3x3 만 남긴다 (3x3x31 = 279 청크층, 틱당 PER_TICK 이라 약 35틱)
+    CHUNKS   = 1,
     PER_TICK = 8,   -- 틱당 만드는 청크층 수 (64칸씩). 7x7x3층 = 147 -> 약 19틱 (런 5: 4 에서 올림)
 }
 
 -- ── 하강 z (HaloDropJumper visualZ). 런 6: 실제 z 가 CarryZ(3) 고정이라 고도 변화가 안 보였고, 마지막 7m
 -- (엔진 낙하, z 3->0) 만 떨어지는 느낌이 났다. 그래서 뛰어내리는 z 를 CarryZ(기본 8)로 올리고 가상 고도에 맞춰
--- LOW_Z 까지 끌어내린다. 낙하산 개방 고도(AutoOpenAltitude)에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC.
+-- LOW_Z 까지 끌어내린다. 기본은 가상 고도에 비례(PROPORTIONAL), 끄면 낙하산 개방 고도에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC.
+-- 11-14: CarryZ 31(엔진 상한) + 비례 매핑으로 변경. Viewpoint 1·3인칭 전용.
 -- 공중 칸은 airFill 이 1~z 층에 만든다 (엔진 current 칸 탐색은 z 아래로 내려가며 첫 칸을 잡으므로
 -- 칸이 없으면 지면 칸이 current 가 되고, 그 칸이 화면 밖이면 캐릭터가 안 그려진다 - IsoGridSquare.IsOnScreen).
-HaloDrop.CARRY_Z_MAX = 12   -- 샌드박스 CarryZ 상한 (런 7: 16·31 은 airFill 폭증 + 로드 창 이탈로 검정·프레임 정지)
+-- 샌드박스 CarryZ 상한. 엔진 층 상한은 31(IsoChunkMap.isGridSquareOutOfRangeZ: -32~31).
+-- 런 7: 아이소에서 16·31 은 airFill 폭증(AIR_FILL 반경 3) + 카메라가 층당 3칸 밀려 로드 창 이탈 -> 검정·프레임 정지.
+-- 31 은 Viewpoint 1·3인칭 전용 전제 (아이소는 Hooks.skipIsoCellRender 로 건너뛰므로 카메라 밀림이 없다).
+-- 아이소로 뛰어내리면 jump 로그에 경고가 남는다(viewCheck).
+HaloDrop.CARRY_Z_MAX = 31
+HaloDrop.ISO_SAFE_Z  = 12   -- 아이소에서 버티는 상한 (viewCheck 경고 기준)
 HaloDrop.DESCENT_Z = {
     ENABLED    = true,
     LOW_Z      = 3,     -- 이 층 아래는 엔진 낙하 (런 3~6 검증 구간)
-    CHUTE_FRAC = 0.5,   -- 낙하산 개방 고도에서 남겨 둘 비율 (0.5 = 캐노피 구간이 나머지 절반을 내려옴)
+    -- 가상 고도 -> 실제 z 를 JumpAltitude~LOW_Z 한 직선으로 잇는다. 층당 미터가 구간마다 같아서
+    -- 화면 하강 속도 비율이 실제 속도 비율(자유낙하 > 캐노피)과 같아진다.
+    -- 이전 CHUTE_FRAC 0.5 는 자유낙하 500m 와 캐노피 93m 에 층을 반씩 나눠 캐노피가 화면상 더 빨랐다(0.15 vs 0.19층/초).
+    PROPORTIONAL = true,
+    CHUTE_FRAC   = 0.5, -- PROPORTIONAL false 일 때만: 낙하산 개방 고도에서 남겨 둘 층 비율
 }
 
 -- ── 강하 그림자 (HaloDropShadow.lua). 발밑 지면 칸에 검은 타원. 캐릭터와의 화면 간격이 남은 높이.
