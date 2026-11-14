@@ -38,6 +38,19 @@ HaloDrop.PRELOAD = {
 -- 로드 창 밖으로 나갔다 -> 3초 제자리 스냅백 -> far move -> 10초 current==null(화면 검정·갱신 정지).
 -- 눈에 보이는 점프 수송기는 JUMP_PLANE_SPEED 로 지나가므로 그 속도를 이어받는 게 맞다.
 HaloDrop.JUMP_VH_MAX         = HaloDrop.JUMP_PLANE_SPEED
+-- 그 중 실제로 이어받는 비율. 배그는 기체 속도를 "약간"만 이어받는다 (claude/PUBG_강하_조작명세서.md 3.2절)
+HaloDrop.JUMP_VH_FRAC        = 0.15
+-- 뛰어내린 뒤 이 시간(ms) 동안은 낙하산을 수동으로 못 편다. 배그: 이탈 2~3초 뒤부터 전개 가능 (명세서 3.2 / 3.4절)
+HaloDrop.CHUTE_LOCK_MS       = 2500
+-- 점프 전 주변 청크 대기 (HaloDropJumper areaCheck). 런 10(11-15): 발밑 칸만 올라오면 바로 떨궈서, 점프 지점 도착 직후
+-- 아직 덜 받은 주변 청크에 걸려 수평 이동이 8번(합계 3.4초) 멈췄다 -- 로드 창 한가운데서 바로 옆 칸이 없었다.
+-- 구름으로 가린 채 주변 반경 CHUNKS 청크가 올라올 때까지 수송기 출발(HaloDropPilot)을 미룬다.
+HaloDrop.JUMP_READY = {
+    CHUNKS     = 5,      -- 플레이어 청크 기준 반경(청크). 5 = 11x11 청크 = +-40칸. 로드 창 최소 폭(13 청크) 안쪽
+    READY_FRAC = 0.95,   -- 이 비율 이상 올라오면 준비 완료 (맵 가장자리처럼 영영 안 오는 청크 대비)
+    MAX_MS     = 10000,  -- 점프 시작(E) 뒤 이 시간이 지나면 덜 올라왔어도 진행
+    CHECK_MS   = 250,    -- 검사 주기
+}
 
 -- 착지 감속. 퐁듀 zombierain.lua 의 LAND_SPEED / FREE_FALL_BRAKE_H 와 같은 값.
 -- 착지 피해 기준은 충돌 속도 약 2.24 층/초(FallingConstants). updateFalling 이 착지 틱에
@@ -52,7 +65,7 @@ HaloDrop.BRAKE_H      = 1.0
 HaloDrop.FF = {
     neutral = { v = 0.77, h = 0.00 },   -- 무입력
     glide   = { v = 0.54, h = 1.00 },   -- W: 앞으로 기울여 활공
-    dive    = { v = 1.00, h = 0.00 },   -- W + 달리기 키: 정면 아래 다이브
+    dive    = { v = 1.00, h = 0.00 },   -- 달리기 키(Shift) 단독: 정면 아래 다이브 (배그 #24)
     brake   = { v = 0.54, h = 0.00 },   -- S: 감속
 }
 -- 캐노피: 수직은 CanopySpeed(=무입력 54km/h) 대비 비율, 수평은 CanopySteer 대비 비율.
@@ -60,7 +73,7 @@ HaloDrop.FF = {
 HaloDrop.CP = {
     neutral = { v = 1.00, h = 0.00 },
     glide   = { v = 1.19, h = 1.00 },   -- W: 전진
-    dive    = { v = 1.50, h = 0.60 },   -- W + 달리기 키: 빠른 하강 (배그 Shift)
+    dive    = { v = 1.50, h = 0.60 },   -- 달리기 키(Shift) 단독: 빠른 하강 (배그 #24)
     brake   = { v = 0.85, h = 0.30 },   -- S: 플레어 (수치는 배그 자료 없음, 임의)
 }
 
@@ -142,13 +155,16 @@ HaloDrop.FIXED = {
     PlaneZ           = 31,    -- 점프 수송기 차량이 나는 실제 층 (엔진 상한)
     CarryZ           = 31,    -- 뛰어내리는 실제 층 (엔진 상한, Viewpoint 1·3인칭 전용)
     JumpAltitude     = 1500,  -- 뛰어내릴 때 가상 고도(m). 영상에서 뛰어내린 직후 고도계 약 1480m
-    AutoOpenAltitude = 300,   -- 낙하산 자동 개방 가상 고도(m). 배그 지면 기준 약 300m
+    AutoOpenAltitude = 240,   -- 낙하산 자동 개방 높이(m). 발밑 바닥(지면·옥상) 기준 -- 배그 현행 실측 지면 위 약 240m
     FreefallSpeed    = 65.0,  -- 자유낙하 최대 하강(m/초) = 풀다이브 234km/h
     CanopySpeed      = 15.0,  -- 낙하산 무입력 하강(m/초) = 54km/h
     -- 수평 속도는 배그 수치(34 / 13)를 못 쓴다: 안티치트 한도(차량 밖 1초 평균 20타일/초) + 청크 스트리밍.
     -- 런 8(11-14): 16 / 13 으로 올렸더니 다음 칸이 안 올라와 수평 이동이 10초·4초씩 멈췄다 -> 런 6 값으로 되돌림
     FreefallSteer    = 12.0,  -- 자유낙하 최대 수평(타일/초)
     CanopySteer      = 8.0,   -- 낙하산 최대 수평(타일/초)
+    -- 관성 계수(1/초): v += (목표 - v) * Accel * dt. 배그 영상 실측에서 역산 (명세서 6절 시간 상수)
+    FreefallAccel    = 0.92,  -- 자유낙하: 2.5초에 정속의 90%
+    CanopyAccel      = 0.68,  -- 전개 후: 1.6초에 속도 절반 (226 -> 111 km/h, 목표 53)
 }
 
 -- 고정값이 있으면 그 값, 아니면 샌드박스 옵션 (등록된 옵션은 로드 후 항상 값이 있다 - fallback 불필요)

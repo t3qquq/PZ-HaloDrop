@@ -2,9 +2,10 @@
 --
 -- 강하 중인 플레이어에게 애니메이션 변수 HaloDropPose 를 세운다. 값에 따라
 -- AnimSets/player/<상태>/HaloDropPose_*.xml 노드가 낙하 클립을 고른다.
---   "freefall" = HaloDropFreefall (배 아래로 수평, 팔 벌림 - 무입력·감속)
---   "glide"    = HaloDropGlide (머리가 35도 아래, 팔 몸 옆 - W 활공)
---   "dive"     = HaloDropDive (거의 수직으로 머리부터 - W + 달리기 다이브)
+--   "freefall" = HaloDropFreefall (엎드림, 무릎 굽혀 발바닥이 위, 팔은 몸 옆에서 살짝 벌림 - 무입력·감속)
+--   "glide"    = HaloDropGlide (엎드려 팔다리를 넓게 벌림 - W 활공)
+--   "dive"     = HaloDropDive (거의 수직으로 머리부터, 팔다리 붙임 - 달리기 키 다이브)
+--   자세 기준: claude/PUBG_강하_조작명세서.md 8.1절. 클립은 anims_X/Bob 에 있다(키 2개 정지 자세, 기울기는 Bip01_Pelvis).
 --   "canopy"   = Bob_FallIdle 0.8배속 (팔을 든 Y자 - 낙하산, 퐁듀 좀비 공습과 같음)
 --   nil        = 변수 해제 (바닐라 애니메이션으로 복귀)
 --

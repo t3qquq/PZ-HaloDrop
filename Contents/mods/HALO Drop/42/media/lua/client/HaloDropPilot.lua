@@ -90,6 +90,11 @@ local function pilotTick()
         return
     end
     if not _run.startMs then
+        -- 주변 청크가 덜 올라왔으면 구름 뒤에서 기다린다 (HaloDrop.JUMP_READY). 수송기는 서버가 띄운 자리에 그대로 둔다
+        if HaloDropJumper and HaloDropJumper.isAreaReady and not HaloDropJumper.isAreaReady() then
+            logOnce("areawait", "jump plane found vid=" .. tostring(_run.vid) .. ", holding until area is ready")
+            return
+        end
         -- 차량이 이 클라에 보이기 시작한 순간부터 시계를 돈다 (그 전엔 어차피 못 옮긴다)
         _run.startMs = now
         log(string.format("jump plane acquired vid=%s at (%.1f,%.1f) %dms after assign", tostring(_run.vid), v:getX(), v:getY(), now - _run.assignedMs))

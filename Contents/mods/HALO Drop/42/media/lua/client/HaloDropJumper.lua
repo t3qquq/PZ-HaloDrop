@@ -19,6 +19,7 @@
 -- 강하 모델 (claude/PUBG_강하_메커니즘_조사.md 9.2 절, 방식 A)
 --   heading(도): 몸이 향한 수평 방향. A/D 가 TurnRate(도/초)로 돌린다. 즉시 꺾이지 않는다.
 --   pitch(-1~+1): W 를 누르면 +1 로, S 를 누르면 -1 로 PitchRate 속도로 기운다. 떼면 0 으로 돌아온다.
+--   달리기 키(Shift)는 W 없이도 다이브(자유낙하)·빠른 하강(낙하산)이다 (배그 #24).
 --   목표 속도: pitch 로 (무입력 <-> 활공/다이브/브레이크) 비율표(HaloDrop.FF / CP)를 보간한다.
 --     W = 활공(앞으로 기울임, 수평 속도 생김), W + 달리기 키 = 다이브(수직 최대, 수평 0), S = 브레이크.
 --   관성: v += (목표 - v) * min(1, Accel*dt). 낙하산을 펴도 속도를 리셋하지 않고 CanopyAccel 로 수렴시킨다
@@ -101,6 +102,31 @@ local function visualZ(alt)
     if alt >= mid then return zMid + (carry - zMid) * (alt - mid) / (top - mid) end
     if alt >= lowAlt then return low + (zMid - low) * (alt - lowAlt) / (mid - lowAlt) end
     return low
+end
+
+-- 실제 z(층) -> 가상 고도(m). visualZ 의 역 (PROPORTIONAL 기준). LOW_Z 아래는 실제 미터.
+local function altOfZ(z)
+    local M = HaloDrop.M_PER_FLOOR
+    local low = lowZ()
+    local D = HaloDrop.DESCENT_Z
+    if z <= low or not D or not D.ENABLED or not D.PROPORTIONAL then return z * M end
+    local carry = carryZ()
+    if carry <= low then return z * M end
+    local lowAlt = low * M
+    return lowAlt + (z - low) * (HaloDrop.opt("JumpAltitude") - lowAlt) / (carry - low)
+end
+
+-- 발밑 바닥(지면·옥상)의 가상 고도와 그 층. 자동 개방을 배그처럼 "아래 지면 기준"으로 판정하는 데 쓴다.
+-- current 칸이 없으면 getHeightAboveFloor 가 기본값을 돌려주므로(런 3: h=1.00) 그때는 지면 0 으로 본다.
+local function groundAlt(p)
+    local floorZ = 0
+    pcall(function()
+        if p:getSquare() ~= nil then
+            floorZ = p:getZ() - p:getHeightAboveFloor()
+            if floorZ < 0 then floorZ = 0 end
+        end
+    end)
+    return altOfZ(floorZ), floorZ
 end
 
 -- ── 시점 확인 (CarryZ 31 은 Viewpoint 1·3인칭 전제) ─────────────────────────
@@ -485,6 +511,49 @@ local function descentZoomStop(reason)
     log(string.format("descent zoom: stop (%s) target=%.2f ok=%s%s", tostring(reason), Z.near or -1, tostring(ok), ok and "" or (" err=" .. tostring(err))))
 end
 
+-- ── 점프 전 주변 청크 대기 (HaloDrop.JUMP_READY) ────────────────────────────
+-- 플레이어 청크 기준 반경 CHUNKS 안에서 이 클라에 올라온 청크 수 (0층 칸 존재로 판정, airFill 과 같은 기준)
+local function areaLoaded()
+    local R = HaloDrop.JUMP_READY.CHUNKS
+    local cell = getCell()
+    local cx, cy = math.floor(J.x / 8), math.floor(J.y / 8)
+    local n, total = 0, 0
+    for wx = cx - R, cx + R do
+        for wy = cy - R, cy + R do
+            total = total + 1
+            if cell:getGridSquare(wx * 8, wy * 8, 0) ~= nil then n = n + 1 end
+        end
+    end
+    return n, total
+end
+
+-- JUMPING 틱에서 부른다. 준비되면 J.jump.areaReady 를 세운다 (HaloDropPilot 이 이걸 보고 수송기를 출발시킨다)
+local function areaCheck(now)
+    local jp = J.jump
+    if not jp or jp.areaReady then return end
+    local R = HaloDrop.JUMP_READY
+    if jp.areaNext and now < jp.areaNext then return end
+    jp.areaNext = now + R.CHECK_MS
+    local n, total = areaLoaded()
+    local waited = now - jp.at
+    if n >= total * R.READY_FRAC then
+        jp.areaReady = true
+        log(string.format("jump: area ready after %dms (chunks %d/%d, radius %d)", waited, n, total, R.CHUNKS))
+    elseif waited > R.MAX_MS then
+        jp.areaReady = true
+        log(string.format("jump: area wait TIMEOUT after %dms (chunks %d/%d, radius %d) -> go anyway", waited, n, total, R.CHUNKS))
+    elseif not jp.areaLog or now >= jp.areaLog then
+        jp.areaLog = now + 2000
+        log(string.format("jump: waiting for area, chunks %d/%d after %dms", n, total, waited))
+    end
+end
+
+-- HaloDropPilot: 주변이 올라왔는가 (JUMPING 이 아니면 막지 않는다)
+function HaloDropJumper.isAreaReady()
+    if J.state ~= "JUMPING" or not J.jump then return true end
+    return J.jump.areaReady == true
+end
+
 -- ── 상태 전이 ─────────────────────────────────────────────────────────────────
 local function finish(p)
     J.state = nil
@@ -541,8 +610,10 @@ local function jump(p, why)
     J.pitch = 0
     -- 뛰어내린 순간 수송기 속도를 이어받는다 (수평), 수직은 0 에서 가속.
     -- 상한 JUMP_VH_MAX: 런 5 에서 80 을 그대로 받아 로드 창을 벗어나 3초 스냅백 + 10초 current==null 이 났다
-    J.vh = math.min(HaloDrop.C.fl.speed, HaloDrop.JUMP_VH_MAX)
+    -- 배그는 기체 속도를 "약간"만 이어받는다 -> JUMP_VH_FRAC
+    J.vh = math.min(HaloDrop.C.fl.speed, HaloDrop.JUMP_VH_MAX) * HaloDrop.JUMP_VH_FRAC
     J.vz = 0
+    J.jumpedAt = now
     J.waitLogged = nil
     J.blockedSince = nil
     planeSoundStop(p)
@@ -579,7 +650,8 @@ local function openChute(p, reason)
         J.chuteSent = true
         send(p, "ChuteOpen", { id = HaloDrop.C.id, reason = reason, alt = math.floor(J.alt) })
     end
-    log(string.format("chute open (%s) alt=%.0fm vz=%.1f vh=%.1f", reason, J.alt, J.vz, J.vh))
+    local gAlt, floorZ = groundAlt(p)
+    log(string.format("chute open (%s) alt=%.0fm above-ground=%.0fm floorZ=%.1f vz=%.1f vh=%.1f", reason, J.alt, J.alt - gAlt, floorZ, J.vz, J.vh))
 end
 
 local function land(p)
@@ -653,7 +725,10 @@ local function onPlayerUpdate(p)
             jp.groundAt = now
             log(string.format("jump: ground loaded after %dms at (%.0f,%.0f)", waited, J.x, J.y))
         end
-        if jp.groundAt then airFill(p) end
+        if jp.groundAt then
+            airFill(p)
+            areaCheck(now)
+        end
         local maxMs = HaloDrop.opt("JumpWaitMax") * 1000
         if jp.planeSeen then
             jump(p, "plane passed")
@@ -683,7 +758,9 @@ local function onPlayerUpdate(p)
     local pitchTarget = 0
     if keyDown("Forward") then pitchTarget = pitchTarget + 1 end
     if keyDown("Backward") then pitchTarget = pitchTarget - 1 end
-    local diving = pitchTarget > 0 and keyDown("Run")
+    -- 달리기 키(Shift) 단독 = 다이브 / 빠른 하강 (배그 #24). S 와 같이 누르면 S(감속)가 이긴다
+    local diving = pitchTarget >= 0 and keyDown("Run")
+    if diving then pitchTarget = 1 end
 
     -- heading: 선회 속도 한도 안에서만 돈다
     J.heading = J.heading + turn * turnRate * dt
@@ -693,7 +770,7 @@ local function onPlayerUpdate(p)
     if J.pitch < pitchTarget then J.pitch = math.min(pitchTarget, J.pitch + pr)
     elseif J.pitch > pitchTarget then J.pitch = math.max(pitchTarget, J.pitch - pr) end
 
-    -- 자세: 자유낙하 중 W+달리기 다이브면 머리부터, W 활공이면 머리 쪽이 들린 자세, 그 외(무입력·감속)는 수평 자세
+    -- 자세: 달리기 키 다이브면 머리부터 수직, W 활공이면 팔다리를 넓게 벌린 수평, 그 외(무입력·감속)는 팔을 몸 옆에 둔 기본 자세
     if not canopy and not J.released then
         local pose = "freefall"
         if J.pitch > 0.5 then pose = diving and "dive" or "glide" end
@@ -764,8 +841,9 @@ local function onPlayerUpdate(p)
         p:setLastFallSpeed(v)
     end
 
+    -- 자동 개방: 발밑 바닥(지면·옥상) 기준 높이. 높은 건물 위를 지나면 더 일찍 펴진다 (배그: 아래 지면 기준)
     local auto = HaloDrop.opt("AutoOpenAltitude")
-    if J.state == "FREEFALL" and auto > 0 and J.alt <= auto then
+    if J.state == "FREEFALL" and auto > 0 and J.alt - groundAlt(p) <= auto then
         openChute(p, "auto")
     end
 end
@@ -780,6 +858,11 @@ local function onKeyPressed(key)
         local C = HaloDrop.C
         if C.fl and getTimestampMs() - C.t0 >= 0 then startJump(p, "key") end
     elseif J.state == "FREEFALL" then
+        local since = getTimestampMs() - (J.jumpedAt or 0)
+        if since < HaloDrop.CHUTE_LOCK_MS then
+            log(string.format("chute key ignored: locked for %dms more", HaloDrop.CHUTE_LOCK_MS - since))
+            return
+        end
         openChute(p, "key")
     end
 end
