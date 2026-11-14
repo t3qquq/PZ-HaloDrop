@@ -731,6 +731,9 @@ local function onPlayerUpdate(p)
                 end)
                 log(string.format("fall: next square (%d,%d) not loaded -> holding horizontal for %dms, player=(%.1f,%.1f,%.1f) window=[%s] hdg=%.0f vh=%.1f",
                     math.floor(nx), math.floor(ny), now - J.blockedSince, p:getX(), p:getY(), p:getZ(), win, J.heading, J.vh))
+                -- 서버에도 같은 칸을 묻는다: 서버에 칸이 있으면 전송·클라 쪽, 없으면 서버 로딩 쪽 병목 (런 9 진단)
+                send(p, "Blocked", { id = HaloDrop.C.id, x = math.floor(nx), y = math.floor(ny), ms = now - J.blockedSince,
+                    px = math.floor(p:getX()), py = math.floor(p:getY()) })
             end
         end
     end

@@ -536,6 +536,20 @@ local function onClientCommand(module, command, player, args)
             R.members[key].landed = true
             R.members[key].aboard = false
         end
+    elseif command == "Blocked" then
+        -- 강하 중 클라가 다음 칸이 없어 수평 이동을 멈췄다. 같은 칸이 서버에 있는지 본다.
+        -- 서버 getCell():getGridSquare 는 ServerMap 을 읽는다(IsoCell.getGridSquare: GameServer.server 분기).
+        local x, y = tonumber(args and args.x), tonumber(args and args.y)
+        if not x or not y then return end
+        local sq = getCell():getGridSquare(x, y, 0) ~= nil
+        local cell = "n/a"
+        if HaloDropNative and HaloDropNative.state then
+            local st = HaloDropNative.state(x, y)
+            cell = (st == 1 and "loaded") or (st == 2 and "loading") or (st == 0 and "not-requested") or (st == -1 and "outside-map") or ("error" .. tostring(st))
+        end
+        log(string.format("blocked diag %s next=(%d,%d) player=(%s,%s) for %sms: serverSquare=%s serverCell=%s -> %s",
+            tostring(player:getUsername()), x, y, tostring(args.px), tostring(args.py), tostring(args.ms),
+            tostring(sq), cell, sq and "SERVER HAS IT (transfer / client side)" or "SERVER NOT LOADED (server side)"))
     elseif command == "Pose" then
         -- 강하 자세 중계: 애니메이션 변수는 네트워크로 안 가므로 전 클라가 그 플레이어에게 직접 세운다
         local pose = args and args.pose or ""
