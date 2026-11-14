@@ -67,7 +67,7 @@ HaloDrop.AIR_FILL = {
 -- 11-14: CarryZ 31(엔진 상한) + 비례 매핑으로 변경. Viewpoint 1·3인칭 전용.
 -- 공중 칸은 airFill 이 1~z 층에 만든다 (엔진 current 칸 탐색은 z 아래로 내려가며 첫 칸을 잡으므로
 -- 칸이 없으면 지면 칸이 current 가 되고, 그 칸이 화면 밖이면 캐릭터가 안 그려진다 - IsoGridSquare.IsOnScreen).
--- 샌드박스 CarryZ 상한. 엔진 층 상한은 31(IsoChunkMap.isGridSquareOutOfRangeZ: -32~31).
+-- CarryZ(HaloDrop.FIXED) 상한. 엔진 층 상한은 31(IsoChunkMap.isGridSquareOutOfRangeZ: -32~31).
 -- 런 7: 아이소에서 16·31 은 airFill 폭증(AIR_FILL 반경 3) + 카메라가 층당 3칸 밀려 로드 창 이탈 -> 검정·프레임 정지.
 -- 31 은 Viewpoint 1·3인칭 전용 전제 (아이소는 Hooks.skipIsoCellRender 로 건너뛰므로 카메라 밀림이 없다).
 -- 아이소로 뛰어내리면 jump 로그에 경고가 남는다(viewCheck).
@@ -124,8 +124,23 @@ function HaloDrop.log(msg)
     print("[HaloDrop] " .. tostring(msg))
 end
 
--- 등록된 샌드박스 옵션은 로드 후 항상 값이 있다 (fallback 불필요)
+-- ── 강하 고정값 (11-14: 샌드박스에서 빼고 하드코딩). 실제 높이만 엔진 상한 31층으로 타협하고
+-- 나머지는 배그 수치 (claude/PUBG_강하_메커니즘_조사.md 3.1 / 4.2 / 5.1 절, 강의 영상 고도계).
+HaloDrop.FIXED = {
+    PlaneZ           = 31,    -- 점프 수송기 차량이 나는 실제 층 (엔진 상한)
+    CarryZ           = 31,    -- 뛰어내리는 실제 층 (엔진 상한, Viewpoint 1·3인칭 전용)
+    JumpAltitude     = 1500,  -- 뛰어내릴 때 가상 고도(m). 영상에서 뛰어내린 직후 고도계 약 1480m
+    AutoOpenAltitude = 300,   -- 낙하산 자동 개방 가상 고도(m). 배그 지면 기준 약 300m
+    FreefallSpeed    = 65.0,  -- 자유낙하 최대 하강(m/초) = 풀다이브 234km/h
+    CanopySpeed      = 15.0,  -- 낙하산 무입력 하강(m/초) = 54km/h
+    FreefallSteer    = 16.0,  -- 자유낙하 최대 수평(타일/초). 배그는 34(122km/h)지만 안티치트 한도(차량 밖 1초 평균 20타일/초) 아래로
+    CanopySteer      = 13.0,  -- 낙하산 최대 수평(타일/초) = W 47km/h
+}
+
+-- 고정값이 있으면 그 값, 아니면 샌드박스 옵션 (등록된 옵션은 로드 후 항상 값이 있다 - fallback 불필요)
 function HaloDrop.opt(name)
+    local v = HaloDrop.FIXED[name]
+    if v ~= nil then return v end
     return SandboxVars.HaloDrop[name]
 end
 
