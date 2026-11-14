@@ -60,13 +60,17 @@ function HaloDropPreload.tick(R, now, findPlayer)
     if not fnState or not fnLoad then
         if not _warned then
             _warned = true
-            log("preload: native functions missing (server not started with -javaagent:HaloDropAgent.jar) -> preload off")
+            log("preload: native functions missing (server not started with -javaagent:HaloDropAgent.jar) -> preload off. Run server-agent/HaloDrop-ServerSetup.bat in the Halo Drop mod folder to install it")
         end
         return
     end
     if not _announced then
         _announced = true
         log("preload: native agent version " .. tostring(HaloDropNative.version) .. " active")
+        if HaloDropNative.version ~= P.AGENT_VERSION then
+            log(string.format("preload: WARNING agent version %s but this mod expects %s -> run server-agent/HaloDrop-ServerSetup.bat again (Install / update)",
+                tostring(HaloDropNative.version), tostring(P.AGENT_VERSION)))
+        end
     end
 
     -- 원하는 셀 목록: 공중에 있는 플레이어(뛰어내린 뒤 ~ 착지 전) 주변만.

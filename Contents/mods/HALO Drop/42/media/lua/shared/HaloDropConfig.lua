@@ -28,6 +28,7 @@ HaloDrop.JUMP_PLANE_MAX_MS   = 20000         -- 점프 수송기 최대 수명(�
 -- 서버 셀(64x64칸) 미리 올리기 (server/HaloDropPreload.lua). 전용 서버를 -javaagent:HaloDropAgent.jar 로 띄웠을 때만 동작한다.
 HaloDrop.PRELOAD = {
     ENABLED      = true,
+    AGENT_VERSION = 1.0,  -- server-agent/HaloDropAgent.jar 의 Agent.VERSION. jar 를 바꾸면 같이 올린다 (다르면 재설치 경고)
     -- 적용 구간: 수송기에서 뛰어내린 순간부터 착지 전까지만. 탑승 중(비행)·착지 후에는 미리 올리지 않는다.
     PLAYER_CELLS = 2,     -- 공중 플레이어 주변으로 올릴 셀 수 (2 = 5x5셀, 클라 로드 범위보다 한 셀 넓게)
     MAX_PENDING  = 2,     -- 동시에 로드를 요청할 셀 수. 크면 빨리 올라오지만 서버 프레임이 더 오래 멈출 수 있다

@@ -10,3 +10,7 @@ desktop.ini
 .DS_Store
 .vscode/
 .idea/
+
+# Halo Drop server setup scripts ship with the mod
+!Contents/mods/HALO Drop/HaloDrop-ServerSetup.bat
+!Contents/mods/HALO Drop/server-agent/HaloDrop-ServerSetup.ps1
