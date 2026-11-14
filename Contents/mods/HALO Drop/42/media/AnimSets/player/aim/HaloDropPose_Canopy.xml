@@ -2,11 +2,13 @@
 <!-- 강하 자세 고정 (client/HaloDropPose.lua). 강하 중인 플레이어는 Lua 가 HaloDropPose 변수를
      freefall / glide / dive / canopy 로 세운다. 붙잡기(hold) 중에는 낙하 속도가 0 이라 bFalling 이 꺼져
      플레이어가 idle 계열 상태에 머물므로, 그 상태들에서 강하 클립을 직접 고른다.
-     freefall = HaloDropFreefall (Bob_TPose 를 앞으로 85도 눕힘: 배 아래, 팔 벌림 - 무입력·감속)
-     glide    = HaloDropGlide    (Bob_Idle 을 앞으로 125도: 머리 아래 35도, 팔 몸 옆 - W)
-     dive     = HaloDropDive     (Bob_Idle 을 앞으로 165도: 거의 수직으로 머리부터 - W + 달리기)
+     freefall = HaloDropFreefall (배 아래 수평 박스 자세: 팔 벌려 팔꿈치 굽힘, 허리 젖힘, 무릎 굽힘 - 무입력·감속)
+     glide    = HaloDropGlide    (머리가 35도 아래, 팔은 몸 옆 뒤로 - W)
+     dive     = HaloDropDive     (거의 수직으로 머리부터, 팔다리를 몸에 붙임 - W + 달리기)
      canopy   = Bob_FallIdle 0.8배속 (퐁듀 좀비 공습 PongDuRainFall 과 같은 클립·속도: 팔을 든 Y자)
-     런 8(11-14): 바닐라 Bob_FallIdle03/04 는 팔다리를 버둥거리는 클립이라 허우적대는 것처럼 보여 교체.
+     자유낙하 3종은 키 2개짜리 정지 자세다. 몸 기울기는 Bip01 이 아니라 Bip01_Pelvis 에 주고,
+     Translation_Data(루트 모션 본)는 제자리라 클립이 캐릭터를 밀지 않는다.
+     클립은 anims_X/Bob 에 둔다: 42/media/anims_X 의 사용자 폴더는 common/media/anims_X 가 없으면 로드되지 않는다.
      m_ConditionPriority 2: 바닐라 노드(0)·ext(1)보다 먼저 고른다 (AnimNode.compareSelectionConditions).
      같은 파일이 player/{idle,turning,turning180,aim,ext,movement,strafe,run,sprint} 에 들어 있다 - 수정 시 전부 같이 바꿀 것. -->
 <animNode>
