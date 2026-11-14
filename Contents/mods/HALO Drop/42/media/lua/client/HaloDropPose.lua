@@ -2,10 +2,10 @@
 --
 -- 강하 중인 플레이어에게 애니메이션 변수 HaloDropPose 를 세운다. 값에 따라
 -- AnimSets/player/<상태>/HaloDropPose_*.xml 노드가 낙하 클립을 고른다.
---   "freefall" = Bob_FallIdle04 (몸통 수평, 배 아래 - 무입력·감속)
---   "glide"    = Bob_FallIdle03 (머리 쪽이 45도 들림 - W 활공)
---   "dive"     = HaloDropDive (머리부터 65도 - W + 달리기 다이브)
---   "canopy"   = HaloDropParaDescent (두 손을 머리 위로 - 낙하산)
+--   "freefall" = HaloDropFreefall (배 아래로 수평, 팔 벌림 - 무입력·감속)
+--   "glide"    = HaloDropGlide (머리가 35도 아래, 팔 몸 옆 - W 활공)
+--   "dive"     = HaloDropDive (거의 수직으로 머리부터 - W + 달리기 다이브)
+--   "canopy"   = Bob_FallIdle 0.8배속 (팔을 든 Y자 - 낙하산, 퐁듀 좀비 공습과 같음)
 --   nil        = 변수 해제 (바닐라 애니메이션으로 복귀)
 --
 -- 사용자 정의 애니메이션 변수는 네트워크로 안 간다(PlayerVariables 는 정해진 변수만 보낸다).

@@ -399,6 +399,7 @@ local function startRound(starter)
         jumps = {},
         ended = false,
     }
+    if HaloDropPreload then HaloDropPreload.reset() end
     local n = 0
     local outside = {}
     for _, p in ipairs(players()) do
@@ -456,6 +457,8 @@ local function onTick()
     if not R then return end
     local now = nowMs()
     jumpPlanesTick()
+    -- 서버 셀 미리 올리기 (HaloDropPreload.lua, 자바 에이전트가 있을 때만 동작)
+    if HaloDropPreload then HaloDropPreload.tick(R, now, findPlayer) end
     if not R.ended and now - R.startAt > R.fl.durMs then
         endRound("path end")
     end

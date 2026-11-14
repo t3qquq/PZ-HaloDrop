@@ -1,10 +1,11 @@
--- Halo Drop 파일럿 클라: 점프 순간의 수송기 차량을 머리 위로 지나가게 끈다
+-- Halo Drop 파일럿 클라: 점프 순간의 수송기 차량을 플레이어 앞에서 멀어지게 끈다
 --
 -- 설계 B (11-06): 비행 구간엔 월드 차량이 없다(클라 청크 스트리밍이 48 타일/초를 못 따라와 차량이 사라짐,
 --   claude/HaloDrop_설계.md 2절). E 를 누르면 서버가 점프 지점 근처에 차량을 띄우고 이 클라에 물리 권한을
---   넘긴다(JumpPlane). 이 클라는 그 차량을 점프 지점 뒤 JUMP_PLANE_BEHIND 에서 앞 JUMP_PLANE_AHEAD 까지
---   JUMP_PLANE_SPEED 로 끌고 지나간 뒤 PlaneDone 을 보낸다. 차량을 처음 잡은 순간 HaloDropJumper.onPlaneAcquired()
---   (구름을 걷어 다가오는 수송기를 보여준다), 점프 지점을 지나는 순간 HaloDropJumper.onPlanePassed().
+--   넘긴다(JumpPlane). 이 클라는 그 차량을 점프 지점 앞 JUMP_PLANE_LEAD 에서 앞 JUMP_PLANE_AHEAD 까지
+--   JUMP_PLANE_SPEED 로 끌고 간 뒤 PlaneDone 을 보낸다. 차량을 처음 잡은 순간 HaloDropJumper.onPlaneAcquired()
+--   (구름을 걷어 앞에서 멀어지는 수송기를 보여준다), JUMP_PLANE_DROP_MS 뒤 HaloDropJumper.onPlanePassed().
+--   런 8(11-14): 머리 위로 지나가게 했더니 같은 층이라 3인칭 카메라를 뚫었다 -> 플레이어를 수송기 뒤에서 떨군다.
 -- 이동: setWorldTransform (내부 Bullet.teleportVehicle). 목적지 칸이 이 클라에 안 올라와 있으면 그 틱은
 --   옮기지 않는다 -- 옮겨 봐야 BaseVehicle.update 가 이전 청크 안으로 되돌린다(b42.21 :3430~3450).
 -- 높이 PlaneZ(층) x PHYS_PER_FLOOR.
@@ -97,12 +98,13 @@ local function pilotTick()
     _run.lostAt = nil
     local t = (now - _run.startMs) / 1000
     local speed = HaloDrop.JUMP_PLANE_SPEED
-    -- 뒤 BEHIND 에서 출발해 JUMP_PLANE_SPEED 로 전진. 점프 지점 통과 시각 = BEHIND / speed
-    local s = -HaloDrop.JUMP_PLANE_BEHIND + speed * t
+    -- 점프 지점 앞 LEAD 에서 출발해 JUMP_PLANE_SPEED 로 멀어진다 (플레이어는 꼬리 뒤에서 떨어진다).
+    -- 뛰어내리는 신호는 수송기가 보이기 시작하고 DROP_MS 뒤.
+    local s = HaloDrop.JUMP_PLANE_LEAD + speed * t
     local x, y = _run.x0 + _run.dx * s, _run.y0 + _run.dy * s
-    if s >= 0 and not _run.passed then
+    if t * 1000 >= HaloDrop.JUMP_PLANE_DROP_MS and not _run.passed then
         _run.passed = true
-        log(string.format("jump plane passed over (%d,%d) at t=%.2fs", _run.x0, _run.y0, t))
+        log(string.format("jump plane drop signal: plane %.0f tiles ahead of (%d,%d) at t=%.2fs", s, _run.x0, _run.y0, t))
         if HaloDropJumper and HaloDropJumper.onPlanePassed then HaloDropJumper.onPlanePassed() end
     end
     if s > HaloDrop.JUMP_PLANE_AHEAD then

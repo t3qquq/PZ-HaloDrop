@@ -544,6 +544,7 @@ local function jump(p, why)
     J.vh = math.min(HaloDrop.C.fl.speed, HaloDrop.JUMP_VH_MAX)
     J.vz = 0
     J.waitLogged = nil
+    J.blockedSince = nil
     planeSoundStop(p)
     HaloDropSky.close("freefall")
     descentZoomStart(p)
@@ -711,11 +712,26 @@ local function onPlayerUpdate(p)
     if J.vh > 0.01 then
         local nx, ny = J.x + hx * J.vh * dt, J.y + hy * J.vh * dt
         if getCell():getGridSquare(math.floor(nx), math.floor(ny), 0) ~= nil then
+            if J.blockedSince then
+                log(string.format("fall: horizontal resumed after %dms at (%.0f,%.0f)", getTimestampMs() - J.blockedSince, J.x, J.y))
+                J.blockedSince = nil
+            end
             J.x, J.y = nx, ny
             J.waitLogged = nil
-        elseif not J.waitLogged then
-            J.waitLogged = true
-            log(string.format("fall: next square (%d,%d) not loaded -> holding horizontal", math.floor(nx), math.floor(ny)))
+        else
+            -- 막힌 동안 1초마다: 로드 창(청크맵) 범위와 플레이어 위치를 남긴다 (런 8: 동쪽 10초 정지 원인 추적)
+            local now = getTimestampMs()
+            if not J.blockedSince then J.blockedSince = now end
+            if not J.waitLogged or now >= J.waitLogged then
+                J.waitLogged = now + 1000
+                local win = "?"
+                pcall(function()
+                    local cm = getCell():getChunkMap(0)
+                    win = string.format("x %d~%d y %d~%d", cm:getWorldXMinTiles(), cm:getWorldXMaxTiles(), cm:getWorldYMinTiles(), cm:getWorldYMaxTiles())
+                end)
+                log(string.format("fall: next square (%d,%d) not loaded -> holding horizontal for %dms, player=(%.1f,%.1f,%.1f) window=[%s] hdg=%.0f vh=%.1f",
+                    math.floor(nx), math.floor(ny), now - J.blockedSince, p:getX(), p:getY(), p:getZ(), win, J.heading, J.vh))
+            end
         end
     end
     p:setForwardDirection(hx, hy)

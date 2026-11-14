@@ -18,10 +18,21 @@ HaloDrop.M_PER_FLOOR  = 2.45                 -- 가상 고도(m) <-> 층. 엔진
 HaloDrop.PHYS_PER_FLOOR = 2.46               -- 차량 물리 y <-> 층. 퐁듀 수송기(PLANE_FLY_ALT)와 같은 값
 HaloDrop.PREP_MS      = 5000                 -- 라운드 시작 방송 후 수송기가 A 를 떠나기까지
 HaloDrop.JUMP_PLANE_GRACE_MS = 8000          -- 점프: 발밑 땅이 올라온 뒤 수송기 없이 기다리는 최대 시간
-HaloDrop.JUMP_PLANE_BEHIND   = 40            -- 점프 수송기 시작 위치: 점프 지점 뒤쪽(타일). 클라 로드 창(±52칸) 안
-HaloDrop.JUMP_PLANE_AHEAD    = 40            -- 점프 수송기 끝 위치: 점프 지점 앞쪽(타일). 지나면 제거 (런 4: 60 은 로드 창 밖이라 skipped 만 늘었다)
-HaloDrop.JUMP_PLANE_SPEED    = 12            -- 점프 수송기 통과 속도(타일/초). 비행 속도(48)로는 1초 만에 지나가 안 보였다(런 4) -> 뒤 40칸 3.3초, 앞 40칸 3.3초
+-- 런 8(11-14): 수송기가 플레이어 머리 위를 지나가면 같은 층(PlaneZ = CarryZ = 31)이라 3인칭 카메라를 뚫고 화면을 덮었다.
+-- -> 플레이어를 수송기 "뒤"에서 떨군다: 수송기는 점프 지점 앞 LEAD 칸에서 나타나 앞으로 날아가고, 플레이어는 꼬리 뒤에서 떨어진다.
+HaloDrop.JUMP_PLANE_LEAD     = 34            -- 점프 수송기 시작 위치: 점프 지점 앞쪽(타일, 기체 중심). C-17 길이 약 53칸이라 꼬리가 플레이어 앞 약 8칸
+HaloDrop.JUMP_PLANE_AHEAD    = 64            -- 점프 수송기 끝 위치: 점프 지점 앞쪽(타일). 지나면 제거. 로드 창 밖 칸은 그 틱 이동을 건너뛴다(skipped)
+HaloDrop.JUMP_PLANE_SPEED    = 12            -- 점프 수송기 속도(타일/초). LEAD 34 -> AHEAD 64 = 2.5초 동안 멀어지는 모습이 보인다
+HaloDrop.JUMP_PLANE_DROP_MS  = 600           -- 수송기가 보이기 시작한 뒤 뛰어내리기까지(ms). 구름이 걷히고 꼬리 뒤에 있는 장면을 잠깐 보여준다
 HaloDrop.JUMP_PLANE_MAX_MS   = 20000         -- 점프 수송기 최대 수명(서버). 클라 PlaneDone 이 안 와도 지운다
+-- 서버 셀(64x64칸) 미리 올리기 (server/HaloDropPreload.lua). 전용 서버를 -javaagent:HaloDropAgent.jar 로 띄웠을 때만 동작한다.
+HaloDrop.PRELOAD = {
+    ENABLED      = true,
+    -- 적용 구간: 수송기에서 뛰어내린 순간부터 착지 전까지만. 탑승 중(비행)·착지 후에는 미리 올리지 않는다.
+    PLAYER_CELLS = 2,     -- 공중 플레이어 주변으로 올릴 셀 수 (2 = 5x5셀, 클라 로드 범위보다 한 셀 넓게)
+    MAX_PENDING  = 2,     -- 동시에 로드를 요청할 셀 수. 크면 빨리 올라오지만 서버 프레임이 더 오래 멈출 수 있다
+    REPORT_MS    = 5000,  -- 로그 주기
+}
 -- 뛰어내린 순간 이어받는 수평 속도(타일/초) 상한. 런 5: fl.speed(80) 을 그대로 받아 첫 0.6초에 30칸을 날아가
 -- 로드 창 밖으로 나갔다 -> 3초 제자리 스냅백 -> far move -> 10초 current==null(화면 검정·갱신 정지).
 -- 눈에 보이는 점프 수송기는 JUMP_PLANE_SPEED 로 지나가므로 그 속도를 이어받는 게 맞다.
@@ -133,8 +144,10 @@ HaloDrop.FIXED = {
     AutoOpenAltitude = 300,   -- 낙하산 자동 개방 가상 고도(m). 배그 지면 기준 약 300m
     FreefallSpeed    = 65.0,  -- 자유낙하 최대 하강(m/초) = 풀다이브 234km/h
     CanopySpeed      = 15.0,  -- 낙하산 무입력 하강(m/초) = 54km/h
-    FreefallSteer    = 16.0,  -- 자유낙하 최대 수평(타일/초). 배그는 34(122km/h)지만 안티치트 한도(차량 밖 1초 평균 20타일/초) 아래로
-    CanopySteer      = 13.0,  -- 낙하산 최대 수평(타일/초) = W 47km/h
+    -- 수평 속도는 배그 수치(34 / 13)를 못 쓴다: 안티치트 한도(차량 밖 1초 평균 20타일/초) + 청크 스트리밍.
+    -- 런 8(11-14): 16 / 13 으로 올렸더니 다음 칸이 안 올라와 수평 이동이 10초·4초씩 멈췄다 -> 런 6 값으로 되돌림
+    FreefallSteer    = 12.0,  -- 자유낙하 최대 수평(타일/초)
+    CanopySteer      = 8.0,   -- 낙하산 최대 수평(타일/초)
 }
 
 -- 고정값이 있으면 그 값, 아니면 샌드박스 옵션 (등록된 옵션은 로드 후 항상 값이 있다 - fallback 불필요)
