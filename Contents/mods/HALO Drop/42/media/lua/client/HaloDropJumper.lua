@@ -488,6 +488,7 @@ end
 -- ── 상태 전이 ─────────────────────────────────────────────────────────────────
 local function finish(p)
     J.state = nil
+    HaloDropPose.set(p, nil)
     planeSoundStop(p)
     p:setBlockMovement(false)
     HaloDropSky.close("finish")
@@ -534,6 +535,7 @@ local function jump(p, why)
     local jp = J.jump or {}
     local now = getTimestampMs()
     J.state = "FREEFALL"
+    HaloDropPose.set(p, "freefall")
     J.alt = HaloDrop.opt("JumpAltitude")
     J.heading = HaloDropFlight.headingDeg(HaloDrop.C.fl)
     J.pitch = 0
@@ -570,6 +572,7 @@ end
 local function openChute(p, reason)
     if J.state ~= "FREEFALL" then return end
     J.state = "CANOPY"
+    HaloDropPose.set(p, "canopy")
     pcall(function() p:getEmitter():playSoundImpl("halodrop_chute", nil) end)
     if not J.chuteSent then
         J.chuteSent = true
@@ -689,6 +692,13 @@ local function onPlayerUpdate(p)
     if J.pitch < pitchTarget then J.pitch = math.min(pitchTarget, J.pitch + pr)
     elseif J.pitch > pitchTarget then J.pitch = math.max(pitchTarget, J.pitch - pr) end
 
+    -- 자세: 자유낙하 중 W+달리기 다이브면 머리부터, W 활공이면 머리 쪽이 들린 자세, 그 외(무입력·감속)는 수평 자세
+    if not canopy and not J.released then
+        local pose = "freefall"
+        if J.pitch > 0.5 then pose = diving and "dive" or "glide" end
+        HaloDropPose.set(p, pose)
+    end
+
     -- 목표 속도 -> 관성으로 수렴
     local tv, th = targets(tbl, vBase, hBase, J.pitch, diving)
     J.vz = approach(J.vz, tv, accel, dt)
@@ -718,6 +728,7 @@ local function onPlayerUpdate(p)
     else
         if not J.released then
             J.released = true
+            HaloDropPose.set(p, nil)   -- 엔진 낙하 구간은 바닐라 낙하·착지 애니메이션에 맡긴다
             log(string.format("release to engine fall at z=%.1f state=%s vz=%.1f", p:getZ(), J.state, J.vz))
         end
         -- 놓기: 엔진이 z 를 내린다. 수평 위치와 낙하 속도만 정한다.

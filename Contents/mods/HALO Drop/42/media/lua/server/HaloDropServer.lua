@@ -533,6 +533,11 @@ local function onClientCommand(module, command, player, args)
             R.members[key].landed = true
             R.members[key].aboard = false
         end
+    elseif command == "Pose" then
+        -- 강하 자세 중계: 애니메이션 변수는 네트워크로 안 가므로 전 클라가 그 플레이어에게 직접 세운다
+        local pose = args and args.pose or ""
+        log("pose " .. tostring(player:getUsername()) .. " -> '" .. tostring(pose) .. "'")
+        toClients("Pose", { oid = player:getOnlineID(), pose = pose })
     elseif command == "Cleanup" then
         chuteTake(player, "client cleanup")
     end
