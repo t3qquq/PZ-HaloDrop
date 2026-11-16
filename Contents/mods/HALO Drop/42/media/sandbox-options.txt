@@ -30,29 +30,9 @@ option HaloDrop.AvoidEmptyNW = {
     page = HaloDrop, translation = HaloDrop_AvoidEmptyNW,
 }
 
-option HaloDrop.FreefallTurnRate = {
-    type = double, min = 10.0, max = 720.0, default = 120.0,
-    page = HaloDrop, translation = HaloDrop_FreefallTurnRate,
-}
-
-option HaloDrop.CanopyTurnRate = {
-    type = double, min = 10.0, max = 720.0, default = 70.0,
-    page = HaloDrop, translation = HaloDrop_CanopyTurnRate,
-}
-
 option HaloDrop.PitchRate = {
     type = double, min = 0.2, max = 20.0, default = 2.0,
     page = HaloDrop, translation = HaloDrop_PitchRate,
-}
-
-option HaloDrop.FreefallAccel = {
-    type = double, min = 0.1, max = 20.0, default = 1.5,
-    page = HaloDrop, translation = HaloDrop_FreefallAccel,
-}
-
-option HaloDrop.CanopyAccel = {
-    type = double, min = 0.1, max = 20.0, default = 0.6,
-    page = HaloDrop, translation = HaloDrop_CanopyAccel,
 }
 
 option HaloDrop.HideCarried = {

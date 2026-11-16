@@ -186,7 +186,7 @@ HaloDrop.FIXED = {
     CanopyAccel      = 0.3,   -- 낙하산 하강: Shift 25 -> 54 km/h 약 10초, W+A/D 27 -> 52 약 5초
     CanopyAccelH     = 1.0,   -- 낙하산 수평: 배그 실측 없음(임의). 하강과 같은 0.3 이면 W 를 눌러도 3초 넘게 굼뜨다
     ChuteDecel       = 4.0,   -- 전개 직후 감속: 150 -> 약 27 km/h 가 1초 (배그 150 -> 18 약 1초, 232 -> 28 약 2초). 끝 기준은 CHUTE_DECEL_END
-    -- 회전(도/초). 샌드박스 같은 이름 옵션은 이 값에 가려 더 이상 쓰이지 않는다
+    -- 회전(도/초)
     FreefallTurnRate     = 180.0,  -- 자유낙하: 몸이 카메라 방향을 따라가는 속도
     FreefallTurnRateKeys = 120.0,  -- 자유낙하: 카메라 값이 없을 때 A / D 회전 속도 (이전 샌드박스 기본값)
     CanopyTurnRate       = 45.0,   -- 낙하산 A / D 선회 (한 바퀴 8초)
