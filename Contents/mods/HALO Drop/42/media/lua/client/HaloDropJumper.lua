@@ -16,15 +16,19 @@
 -- 순서: IsoGameCharacter.update(updateFalling 포함)가 먼저 돌고 OnPlayerUpdate 가 뒤에 발화한다(IsoPlayer).
 --   그래서 여기서 정한 위치가 그 틱의 렌더 위치가 되고, 낙하 속도는 다음 틱 updateFalling 에 쓰인다.
 --
--- 강하 모델 (claude/PUBG_강하_메커니즘_조사.md 9.2 절, 방식 A)
---   heading(도): 몸이 향한 수평 방향. A/D 가 TurnRate(도/초)로 돌린다. 즉시 꺾이지 않는다.
---   pitch(-1~+1): W 를 누르면 +1 로, S 를 누르면 -1 로 PitchRate 속도로 기운다. 떼면 0 으로 돌아온다.
---   달리기 키(Shift)는 W 없이도 다이브(자유낙하)·빠른 하강(낙하산)이다 (배그 #24).
---   목표 속도: pitch 로 (무입력 <-> 활공/다이브/브레이크) 비율표(HaloDrop.FF / CP)를 보간한다.
---     W = 활공(앞으로 기울임, 수평 속도 생김), W + 달리기 키 = 다이브(수직 최대, 수평 0), S = 브레이크.
---   관성: v += (목표 - v) * min(1, Accel*dt). 낙하산을 펴도 속도를 리셋하지 않고 CanopyAccel 로 수렴시킨다
---     (배그 슬링샷: 펴진 직후 몇 초간 자유낙하 속도를 이어받는다).
---   수평 위치는 heading 방향 x 수평 속도로만 움직인다.
+-- 강하 모델 (claude/PUBG_강하_조작명세서.md 2절 조작 / 8절 값 / 9절 조향 -- 배그 실측 11-16)
+--   자유낙하와 낙하산은 조작 체계가 다르다.
+--   자유낙하: heading(몸 방향)이 Viewpoint 카메라 방향을 FreefallTurnRate(180도/초)로 따라간다. Alt 를 누르는 동안은
+--     목표를 갱신하지 않는다(자유시점). W = 카메라 방향 활공(카메라가 아래를 볼수록 수직↑ 수평↓), S = 감속,
+--     A / D = 방향은 그대로 두고 옆으로 이동, 달리기 키(Shift) = 카메라와 무관한 최대 속도 다이브, Ctrl = 효과 없음.
+--     카메라 값이 없으면(아이소·Viewpoint 0.1.7 미만) A / D 가 heading 을 돌린다(이전 방식).
+--   낙하산: 카메라는 조향에 쓰지 않는다. A / D = 선회(45도/초, W 와 같이면 60도/초 + 하강 2배),
+--     W = 전진, S = 거의 정지, 달리기 키 = 빠른 하강, Ctrl = 느린 하강 장거리 활공 (둘 다 W 유무와 무관).
+--   pitch(-1~+1): 앞쪽 입력이면 +1 로, S 면 -1 로 PitchRate 속도로 기운다. 떼면 0. 목표 속도는
+--     무입력 <-> 입력별 비율표(HaloDrop.FF / CP) 항목을 |pitch| 로 보간한다.
+--   관성: v += (목표 - v) * min(1, Accel*dt). 낙하산을 펴도 속도를 리셋하지 않는다: 전개 직후 ChuteDecel 로
+--     급감속하고 캐노피 속도대(CanopySpeed x CHUTE_DECEL_END)에 한 번 들어오면 CanopyAccel 로 수렴한다.
+--   수평 위치 = heading 방향 x vh(전진) + heading 오른쪽 수직 방향 x vs(옆, 자유낙하 A / D).
 -- 안티치트: 차량 밖 캐릭터는 1초 평균 20 타일/초를 넘으면 위반이다(AntiCheatSpeed). 이 검사는 서버 ini
 --   AntiCheatSpeed=4(Disabled) 로 끈 서버에서만 수송기 속도 20 초과·A 로의 순간 이동이 안전하다.
 -- 낙하산 착용·해제는 여기(클라)서 한다. 서버는 아이템 지급(ChuteWear 지시)·회수만 한다 -- 착용 상태는
@@ -319,19 +323,71 @@ local function approach(v, target, rate, dt)
     return v + (target - v) * k
 end
 
--- 입력 -> 목표 (수직 m/s, 수평 타일/초). table 은 HaloDrop.FF 또는 HaloDrop.CP
-local function targets(tbl, vBase, hBase, pitch, diving)
-    local base = tbl.neutral
-    local toward
-    if pitch >= 0 then
-        toward = diving and tbl.dive or tbl.glide
-    else
-        toward = tbl.brake
-    end
-    local f = math.abs(pitch)
+-- 무입력(base) <-> 입력 항목(toward) 을 f(0~1) 로 보간한 목표 (수직 m/s, 수평 타일/초). 항목은 HaloDrop.FF / CP 의 { v, h }
+local function targets(base, toward, vBase, hBase, f)
     local v = base.v + (toward.v - base.v) * f
     local h = base.h + (toward.h - base.h) * f
     return v * vBase, h * hBase
+end
+
+local function clamp01(v)
+    if v < 0 then return 0 elseif v > 1 then return 1 end
+    return v
+end
+
+-- ── 조향 카메라 (HaloDrop.CAM) ────────────────────────────────────────────────
+-- Viewpoint 0.1.7 공개 Lua: Viewpoint.Addons.viewState() -> { on, mode, eye = { x, y, z, yaw, pitch }, fov,
+--   crosshair = { x, y, z, dx, dy, dz }, freeCamera, cursorCaptured, ... } (jar 의 클래스·멤버 이름으로 확인, 값의 단위·축은 미실측).
+-- 방향은 crosshair 광선의 (dx, dy) 를 쓴다: 월드 좌표 방향이라면 atan2(dy, dx) 가 heading 과 같은 기준이다.
+-- 축·부호 가정이 맞는지는 tick 로그의 cam= 값으로 확인한다 (틀리면 HaloDrop.CAM 과 이 함수만 고치면 된다).
+-- 돌려주는 값: 수평 방향(도) 또는 nil(이번 틱 방향 없음), 아래를 보는 정도(0~1), 카메라 사용 가능 여부
+local KEY_SLOW     = Keyboard.KEY_LCONTROL   -- 낙하산 느린 하강 (배그 Ctrl). 바닐라 기본 바인딩은 조준
+local KEY_FREELOOK = Keyboard.KEY_LMENU      -- 자유낙하 자유시점 (배그 Alt). 바닐라 기본 바인딩은 전력질주
+
+local _cam = { ok = false }
+local function readCamera()
+    local okCall, st = pcall(function()
+        if Viewpoint and Viewpoint.Addons and Viewpoint.Addons.viewState then return Viewpoint.Addons.viewState() end
+        return nil
+    end)
+    _cam.ok = false
+    if not okCall then
+        if not _cam.errLogged then
+            _cam.errLogged = true
+            log("camera: viewState call FAILED err=" .. tostring(st))
+        end
+        return nil, 0, false
+    end
+    if not st or not st.on or st.freeCamera then return nil, 0, false end
+    local c = st.crosshair
+    if not c or c.dx == nil or c.dy == nil or c.dz == nil then return nil, 0, false end
+    local dx, dy, dz = c.dx, c.dy, c.dz
+    local len = math.sqrt(dx * dx + dy * dy + dz * dz)
+    if len < 0.0001 then return nil, 0, false end
+    _cam.ok = true
+    _cam.dx, _cam.dy, _cam.dz = dx, dy, dz
+    _cam.mode = st.mode
+    local e = st.eye
+    _cam.yaw, _cam.pitch = e and e.yaw or nil, e and e.pitch or nil
+    local C = HaloDrop.CAM
+    local flat = math.sqrt(dx * dx + dy * dy) / len
+    local hdg = nil
+    if flat >= C.MIN_FLAT then hdg = math.deg(math.atan2(dy, dx)) end
+    local down = 0
+    if C.PITCH then
+        down = clamp01((C.DOWN_SIGN * dz / len - C.DOWN_START) / (C.DOWN_FULL - C.DOWN_START))
+    end
+    return hdg, down, true
+end
+
+-- tick 로그용 카메라 요약
+local function camText(p)
+    local look = "?"
+    pcall(function() look = string.format("%.0f", math.deg(p:getLookAngleRadians())) end)
+    if not _cam.ok then return "none look=" .. look end
+    return string.format("mode=%s d=(%.2f,%.2f,%.2f) eyeYaw=%s eyePitch=%s look=%s target=%s",
+        tostring(_cam.mode), _cam.dx, _cam.dy, _cam.dz, tostring(_cam.yaw), tostring(_cam.pitch), look,
+        J.camTarget and string.format("%.0f", J.camTarget) or "nil")
 end
 
 
@@ -572,7 +628,7 @@ function HaloDropJumper.board()
     J.lastTs = getTimestampMs()
     J.released = false
     J.chuteSent = false
-    J.vz, J.vh = 0, 0
+    J.vz, J.vh, J.vs = 0, 0, 0
     J.jump = nil
     planeSoundStart(p)
     HaloDropSky.open()
@@ -613,6 +669,11 @@ local function jump(p, why)
     -- 배그는 기체 속도를 "약간"만 이어받는다 -> JUMP_VH_FRAC
     J.vh = math.min(HaloDrop.C.fl.speed, HaloDrop.JUMP_VH_MAX) * HaloDrop.JUMP_VH_FRAC
     J.vz = 0
+    J.vs = 0
+    J.camTarget = nil
+    J.camMode = nil
+    J.openAt = nil
+    J.fwdToward = nil
     J.jumpedAt = now
     J.waitLogged = nil
     J.blockedSince = nil
@@ -644,6 +705,10 @@ end
 local function openChute(p, reason)
     if J.state ~= "FREEFALL" then return end
     J.state = "CANOPY"
+    J.openAt = nil
+    J.fwdToward = nil
+    J.deploying = true
+    J.openedAt = getTimestampMs()
     HaloDropPose.set(p, "canopy")
     pcall(function() p:getEmitter():playSoundImpl("halodrop_chute", nil) end)
     if not J.chuteSent then
@@ -651,7 +716,7 @@ local function openChute(p, reason)
         send(p, "ChuteOpen", { id = HaloDrop.C.id, reason = reason, alt = math.floor(J.alt) })
     end
     local gAlt, floorZ = groundAlt(p)
-    log(string.format("chute open (%s) alt=%.0fm above-ground=%.0fm floorZ=%.1f vz=%.1f vh=%.1f", reason, J.alt, J.alt - gAlt, floorZ, J.vz, J.vh))
+    log(string.format("chute open (%s) alt=%.0fm above-ground=%.0fm floorZ=%.1f vz=%.1f vh=%.1f vs=%.1f", reason, J.alt, J.alt - gAlt, floorZ, J.vz, J.vh, J.vs or 0))
 end
 
 local function land(p)
@@ -692,9 +757,10 @@ local function onPlayerUpdate(p)
         pcall(function() ai = tostring(p:getCurrentStateName()) end)
         pcall(function() act = tostring(p:getActionStateName()) end)
         pcall(function() anim = tostring(p:getAnimationStateName()) end)
-        log(string.format("tick state=%s alt=%.0fm z=%.2f pos=(%.1f,%.1f) vz=%.1f vh=%.1f hdg=%.0f pitch=%.2f fall=%.2f h=%.2f released=%s falling=%s ai=%s action=%s anim=%s",
-            tostring(J.state), J.alt or -1, p:getZ(), p:getX(), p:getY(), J.vz or 0, J.vh or 0, J.heading or 0, J.pitch or 0,
+        log(string.format("tick state=%s alt=%.0fm z=%.2f pos=(%.1f,%.1f) vz=%.1f vh=%.1f vs=%.1f hdg=%.0f pitch=%.2f fall=%.2f h=%.2f released=%s falling=%s ai=%s action=%s anim=%s",
+            tostring(J.state), J.alt or -1, p:getZ(), p:getX(), p:getY(), J.vz or 0, J.vh or 0, J.vs or 0, J.heading or 0, J.pitch or 0,
             p:getLastFallSpeed(), h, tostring(J.released), tostring(p:isFalling()), ai, act, anim))
+        if J.state == "FREEFALL" or J.state == "CANOPY" then log("tick cam=" .. camText(p)) end
     end
 
     if J.state == "ABOARD" then
@@ -745,8 +811,6 @@ local function onPlayerUpdate(p)
     airFill(p)
     if not J.released then viewCheck("descent") end   -- 강하 중 시점 전환 감지 (바뀔 때만 로그)
     local canopy = J.state == "CANOPY"
-    local turnRate = canopy and HaloDrop.opt("CanopyTurnRate") or HaloDrop.opt("FreefallTurnRate")
-    local accel = canopy and HaloDrop.opt("CanopyAccel") or HaloDrop.opt("FreefallAccel")
     local vBase = canopy and HaloDrop.opt("CanopySpeed") or HaloDrop.opt("FreefallSpeed")
     local hBase = canopy and HaloDrop.opt("CanopySteer") or HaloDrop.opt("FreefallSteer")
     local tbl = canopy and HaloDrop.CP or HaloDrop.FF
@@ -755,39 +819,104 @@ local function onPlayerUpdate(p)
     local turn = 0
     if keyDown("Left") then turn = turn - 1 end
     if keyDown("Right") then turn = turn + 1 end
-    local pitchTarget = 0
-    if keyDown("Forward") then pitchTarget = pitchTarget + 1 end
-    if keyDown("Backward") then pitchTarget = pitchTarget - 1 end
-    -- 달리기 키(Shift) 단독 = 다이브 / 빠른 하강 (배그 #24). S 와 같이 누르면 S(감속)가 이긴다
-    local diving = pitchTarget >= 0 and keyDown("Run")
-    if diving then pitchTarget = 1 end
+    local fwd, back, run = keyDown("Forward"), keyDown("Backward"), keyDown("Run")
+    local camHdg, camDown, camOn = readCamera()
+    if camOn ~= J.camMode then
+        J.camMode = camOn
+        log("camera steering: " .. (camOn and "ON (Viewpoint view state)" or "OFF (no view state -> A/D turns in freefall)") .. " state=" .. tostring(J.state))
+    end
 
-    -- heading: 선회 속도 한도 안에서만 돈다
-    J.heading = J.heading + turn * turnRate * dt
-    J.heading = wrapDeg(J.heading)
+    -- pitchTarget: 앞쪽 입력 +1, S -1. toward: 그 입력의 비율표 항목. S 가 다른 입력을 이긴다
+    local pitchTarget = 0
+    local toward = nil        -- 이번 틱 앞쪽 입력의 항목 (없으면 직전 항목으로 0 까지 되돌아간다)
+    local diving = false      -- 자유낙하 Shift 다이브 (자세·옆 이동 판정용)
+    local strafing = false    -- 자유낙하 A / D 옆 이동
+    local accelV, accelH
+    if canopy then
+        -- 낙하산: A / D 선회. 카메라는 쓰지 않는다
+        local rate = (fwd and not back) and HaloDrop.opt("CanopyTurnRateFwd") or HaloDrop.opt("CanopyTurnRate")
+        J.heading = wrapDeg(J.heading + turn * rate * dt)
+        if back then pitchTarget = -1
+        elseif run then pitchTarget, toward = 1, tbl.dive
+        elseif keyDown(KEY_SLOW) then pitchTarget, toward = 1, tbl.slow
+        elseif fwd and turn ~= 0 then pitchTarget, toward = 1, tbl.turn
+        elseif fwd then pitchTarget, toward = 1, tbl.glide
+        elseif turn ~= 0 then pitchTarget, toward = 1, tbl.spin
+        end
+        -- 전개 직후엔 급감속(J.deploying), 캐노피 속도대에 한 번 들어오면 그 뒤로는 느린 수렴
+        if J.deploying and J.vz <= vBase * HaloDrop.CHUTE_DECEL_END then
+            J.deploying = false
+            log(string.format("chute decel done after %dms vz=%.1f vh=%.1f", now - (J.openedAt or now), J.vz, J.vh))
+        end
+        accelV = J.deploying and HaloDrop.opt("ChuteDecel") or HaloDrop.opt("CanopyAccel")
+        accelH = J.deploying and HaloDrop.opt("ChuteDecel") or HaloDrop.opt("CanopyAccelH")
+    else
+        if camOn then
+            -- 자유낙하: 몸이 카메라 방향을 따라간다. Alt(자유시점) 중이거나 거의 수직으로 보는 중이면 목표를 그대로 둔다
+            if camHdg and not keyDown(KEY_FREELOOK) then J.camTarget = camHdg end
+            if J.camTarget then
+                local d = wrapDeg(J.camTarget - J.heading)
+                local step = HaloDrop.opt("FreefallTurnRate") * dt
+                if d > step then d = step elseif d < -step then d = -step end
+                J.heading = wrapDeg(J.heading + d)
+            end
+            strafing = turn ~= 0
+        else
+            J.heading = wrapDeg(J.heading + turn * HaloDrop.opt("FreefallTurnRateKeys") * dt)
+        end
+        if back then pitchTarget = -1
+        elseif run then pitchTarget, toward, diving = 1, tbl.dive, true
+        elseif fwd then
+            pitchTarget = 1
+            -- 카메라가 아래를 볼수록 수직이 빨라지고 수평이 준다
+            local g, gd = tbl.glide, tbl.glideDown
+            J.glideMix = J.glideMix or { v = g.v, h = g.h }
+            J.glideMix.v = g.v + (gd.v - g.v) * camDown
+            J.glideMix.h = g.h + (gd.h - g.h) * camDown
+            toward = J.glideMix
+        end
+        accelV = HaloDrop.opt("FreefallAccel")
+        accelH = accelV
+    end
+    if toward then J.fwdToward = toward end
+
     -- pitch: 즉시 +-1 로 튀지 않고 PitchRate 로 기운다
     local pr = HaloDrop.opt("PitchRate") * dt
     if J.pitch < pitchTarget then J.pitch = math.min(pitchTarget, J.pitch + pr)
     elseif J.pitch > pitchTarget then J.pitch = math.max(pitchTarget, J.pitch - pr) end
 
-    -- 자세: 달리기 키 다이브면 머리부터 수직, W 활공이면 팔다리를 넓게 벌린 수평, 그 외(무입력·감속)는 팔을 몸 옆에 둔 기본 자세
+    -- 자세: Shift 다이브나 아래를 보며 W 면 머리부터 수직, W 활공이면 팔다리를 넓게 벌린 수평, 그 외(무입력·감속·옆 이동)는 기본 자세
     if not canopy and not J.released then
         local pose = "freefall"
-        if J.pitch > 0.5 then pose = diving and "dive" or "glide" end
+        if J.pitch > 0.5 then
+            if diving or (fwd and camDown > 0.6) then pose = "dive" else pose = "glide" end
+        end
         HaloDropPose.set(p, pose)
     end
 
     -- 목표 속도 -> 관성으로 수렴
-    local tv, th = targets(tbl, vBase, hBase, J.pitch, diving)
-    J.vz = approach(J.vz, tv, accel, dt)
-    J.vh = approach(J.vh, th, accel, dt)
+    local item = (J.pitch < 0) and tbl.brake or (J.fwdToward or tbl.glide)
+    local tv, th = targets(tbl.neutral, item, vBase, hBase, math.abs(J.pitch))
+    local ts = 0
+    if strafing and not diving then
+        -- 옆 이동: heading 오른쪽(+) / 왼쪽(-). A / D 만 누르면 하강도 strafe 값으로
+        ts = turn * tbl.strafe.h * hBase
+        if pitchTarget == 0 then tv = tbl.strafe.v * vBase end
+        -- 전진과 합쳐도 수평 상한(hBase)을 넘지 않게
+        local m = math.sqrt(th * th + ts * ts)
+        if m > hBase then th, ts = th * hBase / m, ts * hBase / m end
+    end
+    J.vz = approach(J.vz, tv, accelV, dt)
+    J.vh = approach(J.vh, th, accelH, dt)
+    J.vs = approach(J.vs, ts, accelH, dt)
 
-    -- 수평 이동은 heading 방향으로만. 다음 칸이 이 클라에 아직 안 올라와 있으면 가상 위치를 전진시키지 않는다
+    -- 수평 이동: heading 방향 vh + 오른쪽 수직 방향 vs. 다음 칸이 이 클라에 아직 안 올라와 있으면 가상 위치를 전진시키지 않는다
     -- (런 5: 미로드 칸으로 나가면 postupdate 가 직전 칸 중앙으로 되돌리고, 가상 위치만 앞서가 far move 가 났다)
     local r = math.rad(J.heading)
     local hx, hy = math.cos(r), math.sin(r)
-    if J.vh > 0.01 then
-        local nx, ny = J.x + hx * J.vh * dt, J.y + hy * J.vh * dt
+    local mx, my = hx * J.vh - hy * J.vs, hy * J.vh + hx * J.vs
+    if mx * mx + my * my > 0.0001 then
+        local nx, ny = J.x + mx * dt, J.y + my * dt
         if getCell():getGridSquare(math.floor(nx), math.floor(ny), 0) ~= nil then
             if J.blockedSince then
                 log(string.format("fall: horizontal resumed after %dms at (%.0f,%.0f)", getTimestampMs() - J.blockedSince, J.x, J.y))
@@ -806,8 +935,8 @@ local function onPlayerUpdate(p)
                     local cm = getCell():getChunkMap(0)
                     win = string.format("x %d~%d y %d~%d", cm:getWorldXMinTiles(), cm:getWorldXMaxTiles(), cm:getWorldYMinTiles(), cm:getWorldYMaxTiles())
                 end)
-                log(string.format("fall: next square (%d,%d) not loaded -> holding horizontal for %dms, player=(%.1f,%.1f,%.1f) window=[%s] hdg=%.0f vh=%.1f",
-                    math.floor(nx), math.floor(ny), now - J.blockedSince, p:getX(), p:getY(), p:getZ(), win, J.heading, J.vh))
+                log(string.format("fall: next square (%d,%d) not loaded -> holding horizontal for %dms, player=(%.1f,%.1f,%.1f) window=[%s] hdg=%.0f vh=%.1f vs=%.1f",
+                    math.floor(nx), math.floor(ny), now - J.blockedSince, p:getX(), p:getY(), p:getZ(), win, J.heading, J.vh, J.vs))
                 -- 서버에도 같은 칸을 묻는다: 서버에 칸이 있으면 전송·클라 쪽, 없으면 서버 로딩 쪽 병목 (런 9 진단)
                 send(p, "Blocked", { id = HaloDrop.C.id, x = math.floor(nx), y = math.floor(ny), ms = now - J.blockedSince,
                     px = math.floor(p:getX()), py = math.floor(p:getY()) })
@@ -842,9 +971,16 @@ local function onPlayerUpdate(p)
     end
 
     -- 자동 개방: 발밑 바닥(지면·옥상) 기준 높이. 높은 건물 위를 지나면 더 일찍 펴진다 (배그: 아래 지면 기준)
+    -- 닿은 뒤 CHUTE_OPEN_MS 동안은 자유낙하 속도로 계속 떨어진 다음 펴진다 (배그: 무입력 약 290m, 다이브 약 250m)
     local auto = HaloDrop.opt("AutoOpenAltitude")
-    if J.state == "FREEFALL" and auto > 0 and J.alt - groundAlt(p) <= auto then
-        openChute(p, "auto")
+    if J.state == "FREEFALL" and auto > 0 then
+        if J.openAt then
+            if now >= J.openAt then openChute(p, "auto") end
+        elseif J.alt - groundAlt(p) <= auto then
+            J.openAt = now + HaloDrop.CHUTE_OPEN_MS
+            log(string.format("chute auto-open armed at alt=%.0fm above-ground=%.0fm vz=%.1f -> opens in %dms",
+                J.alt, J.alt - groundAlt(p), J.vz, HaloDrop.CHUTE_OPEN_MS))
+        end
     end
 end
 Events.OnPlayerUpdate.Add(onPlayerUpdate)
@@ -858,11 +994,7 @@ local function onKeyPressed(key)
         local C = HaloDrop.C
         if C.fl and getTimestampMs() - C.t0 >= 0 then startJump(p, "key") end
     elseif J.state == "FREEFALL" then
-        local since = getTimestampMs() - (J.jumpedAt or 0)
-        if since < HaloDrop.CHUTE_LOCK_MS then
-            log(string.format("chute key ignored: locked for %dms more", HaloDrop.CHUTE_LOCK_MS - since))
-            return
-        end
+        -- 수동 전개는 잠금·지연 없이 바로 (배그의 고도 기준 잠금은 넣지 않는다)
         openChute(p, "key")
     end
 end

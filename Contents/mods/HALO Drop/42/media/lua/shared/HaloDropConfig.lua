@@ -38,10 +38,15 @@ HaloDrop.PRELOAD = {
 -- 로드 창 밖으로 나갔다 -> 3초 제자리 스냅백 -> far move -> 10초 current==null(화면 검정·갱신 정지).
 -- 눈에 보이는 점프 수송기는 JUMP_PLANE_SPEED 로 지나가므로 그 속도를 이어받는 게 맞다.
 HaloDrop.JUMP_VH_MAX         = HaloDrop.JUMP_PLANE_SPEED
--- 그 중 실제로 이어받는 비율. 배그는 기체 속도를 "약간"만 이어받는다 (claude/PUBG_강하_조작명세서.md 3.2절)
+-- 그 중 실제로 이어받는 비율. 배그 실측: 잔류 수평 50~70km/h 가 5~8초에 사라져 체감은 제자리 (claude/PUBG_강하_조작명세서.md 1절)
 HaloDrop.JUMP_VH_FRAC        = 0.15
--- 뛰어내린 뒤 이 시간(ms) 동안은 낙하산을 수동으로 못 편다. 배그: 이탈 2~3초 뒤부터 전개 가능 (명세서 3.2 / 3.4절)
-HaloDrop.CHUTE_LOCK_MS       = 2500
+-- 자동 개방: AutoOpenAltitude 에 닿은 뒤 이 시간(ms)이 지나야 낙하산 상태가 된다. 그동안은 자유낙하 속도로 계속 떨어진다.
+-- 배그 실측 두 점(무입력 150km/h 는 약 290m, 234km/h 다이브는 약 250m 에서 펴짐)을 동시에 맞추는 값:
+--   290 = A - 41.7 x d, 250 = A - 65 x d  ->  d = 1.7초, A = 360m. 배그 수동 전개도 키 입력 약 2초 뒤에 펴진다(같은 전개 시간).
+-- 수동 개방(상호작용 키)은 지연·잠금 없이 바로 펴진다 (전개 연출 없음, 배그의 고도 기준 수동 전개 잠금도 넣지 않는다 - 11-16 결정).
+HaloDrop.CHUTE_OPEN_MS       = 1700
+-- 전개 직후 급감속(ChuteDecel)을 끝내는 기준: 하강 속도가 CanopySpeed 의 이 배수 아래로 내려오면 CanopyAccel 로 넘어간다
+HaloDrop.CHUTE_DECEL_END     = 1.15
 -- 점프 전 주변 청크 대기 (HaloDropJumper areaCheck). 런 10(11-15): 발밑 칸만 올라오면 바로 떨궈서, 점프 지점 도착 직후
 -- 아직 덜 받은 주변 청크에 걸려 수평 이동이 8번(합계 3.4초) 멈췄다 -- 로드 창 한가운데서 바로 옆 칸이 없었다.
 -- 구름으로 가린 채 주변 반경 CHUNKS 청크가 올라올 때까지 수송기 출발(HaloDropPilot)을 미룬다.
@@ -58,23 +63,37 @@ HaloDrop.JUMP_READY = {
 HaloDrop.LAND_SPEED   = 1.2
 HaloDrop.BRAKE_H      = 1.0
 
--- ── 강하 모델 (PUBG 실측 비율, claude/PUBG_강하_메커니즘_조사.md 3.1 / 5.1 절) ──────────
--- 자유낙하: 수직은 FreefallSpeed(=풀다이브 234km/h 에 해당) 대비 비율, 수평은 FreefallSteer 대비 비율.
---   풀다이브 234 / 무입력 180 / 활공·브레이크 126 km/h -> 1.00 / 0.77 / 0.54
---   활공 수평 122 km/h 는 수평 상한(FreefallSteer)을 그대로 쓴다.
+-- ── 강하 모델 (PUBG 실측 11-16, claude/PUBG_강하_조작명세서.md 3절 / 8절) ──────────────────
+-- 환산 규칙(명세서 7절): 수직은 1:1(km/h / 3.6), 수평은 배그 값 x k (k = FreefallSteer / 34), 회전·시간 상수는 1:1.
+-- 자유낙하: v = FreefallSpeed(65 m/s = Shift 다이브 234km/h) 대비 비율, h = FreefallSteer 대비 비율.
 HaloDrop.FF = {
-    neutral = { v = 0.77, h = 0.00 },   -- 무입력
-    glide   = { v = 0.54, h = 1.00 },   -- W: 앞으로 기울여 활공
-    dive    = { v = 1.00, h = 0.00 },   -- 달리기 키(Shift) 단독: 정면 아래 다이브 (배그 #24)
-    brake   = { v = 0.54, h = 0.00 },   -- S: 감속
+    neutral   = { v = 0.64, h = 0.00 },   -- 무입력: 150 km/h, 수평 0
+    glide     = { v = 0.77, h = 1.00 },   -- W + 카메라 수평: 180 / 122 km/h
+    glideDown = { v = 1.00, h = 0.33 },   -- W + 카메라 아래: 232 / 약 40 km/h (카메라 피치로 glide 와 보간)
+    dive      = { v = 1.00, h = 0.00 },   -- 달리기 키(Shift) 단독: 234 km/h, 카메라 각도와 무관
+    brake     = { v = 0.59, h = 0.00 },   -- S: 137 km/h
+    strafe    = { v = 0.59, h = 0.65 },   -- A / D 단독: 138 km/h, 옆으로 약 80 km/h (h 는 heading 의 좌우 수직 방향)
 }
--- 캐노피: 수직은 CanopySpeed(=무입력 54km/h) 대비 비율, 수평은 CanopySteer 대비 비율.
---   무입력 54 / W 64 km/h 수직, W 47 km/h 수평 -> 1.00 / 1.19, 수평 1.00
+-- 낙하산: v = CanopySpeed(6.9 m/s = 무입력 25km/h) 대비 비율, h = CanopySteer(W 72km/h x k) 대비 비율.
 HaloDrop.CP = {
-    neutral = { v = 1.00, h = 0.00 },
-    glide   = { v = 1.19, h = 1.00 },   -- W: 전진
-    dive    = { v = 1.50, h = 0.60 },   -- 달리기 키(Shift) 단독: 빠른 하강 (배그 #24)
-    brake   = { v = 0.85, h = 0.30 },   -- S: 플레어 (수치는 배그 자료 없음, 임의)
+    neutral = { v = 1.00, h = 0.00 },   -- 무입력: 25 km/h, 수평 0
+    glide   = { v = 1.00, h = 1.00 },   -- W: 25 / 72 km/h
+    dive    = { v = 2.16, h = 0.80 },   -- 달리기 키(Shift): 54 / 57 km/h. W 유무와 무관
+    brake   = { v = 0.32, h = 0.00 },   -- S: 8 km/h, 거의 정지
+    slow    = { v = 0.44, h = 0.87 },   -- Ctrl: 11 / 62 km/h 장거리 활공. W 유무와 무관
+    turn    = { v = 2.00, h = 0.75 },   -- W + A / D: 50 / 약 55 km/h, 선회 CanopyTurnRateFwd
+    spin    = { v = 1.00, h = 0.40 },   -- A / D 단독: 하강은 그대로 25~27 km/h, 선회 CanopyTurnRate
+}
+
+-- ── 조향 카메라 (HaloDropJumper readCamera). 자유낙하는 몸이 Viewpoint 카메라 방향을 따라간다 (명세서 2절 / 9절).
+-- 출처: Viewpoint 0.1.7 공개 Lua `Viewpoint.Addons.viewState()` 의 crosshair 광선 방향(dx, dy, dz).
+-- 값이 없으면(아이소·구버전 Viewpoint) 자유낙하도 A / D 회전으로 조향한다 (FreefallTurnRateKeys).
+HaloDrop.CAM = {
+    PITCH      = true,   -- W 활공에 카메라 피치를 반영 (FF.glide <-> FF.glideDown). false 면 W = glide 고정
+    DOWN_SIGN  = -1,     -- 아래를 볼 때 dz 의 부호. 첫 런 로그(cam= dz)로 확인 전 가정값: 음수 = 아래
+    DOWN_START = 0.25,   -- 시선의 아래 성분(0~1)이 이 값부터 glideDown 쪽으로 기운다 (약 15도)
+    DOWN_FULL  = 0.85,   -- 이 값 이상이면 glideDown (약 58도)
+    MIN_FLAT   = 0.15,   -- 시선의 수평 성분이 이보다 작으면(거의 수직 아래·위) 방향 목표를 갱신하지 않는다
 }
 
 -- ── 공중 칸 채우기 (HaloDropJumper airFill). 런 4 쿼터뷰 검정 화면 실험. CHUNKS 0 이면 끔 ──────
@@ -150,21 +169,28 @@ function HaloDrop.log(msg)
 end
 
 -- ── 강하 고정값 (11-14: 샌드박스에서 빼고 하드코딩). 실제 높이만 엔진 상한 31층으로 타협하고
--- 나머지는 배그 수치 (claude/PUBG_강하_메커니즘_조사.md 3.1 / 4.2 / 5.1 절, 강의 영상 고도계).
+-- 나머지는 배그 실측 수치 (claude/PUBG_강하_조작명세서.md 3절 속도표 / 8절 환산, 11-16).
 HaloDrop.FIXED = {
     PlaneZ           = 31,    -- 점프 수송기 차량이 나는 실제 층 (엔진 상한)
     CarryZ           = 31,    -- 뛰어내리는 실제 층 (엔진 상한, Viewpoint 1·3인칭 전용)
     JumpAltitude     = 1500,  -- 뛰어내릴 때 가상 고도(m). 영상에서 뛰어내린 직후 고도계 약 1480m
-    AutoOpenAltitude = 240,   -- 낙하산 자동 개방 높이(m). 발밑 바닥(지면·옥상) 기준 -- 배그 현행 실측 지면 위 약 240m
-    FreefallSpeed    = 65.0,  -- 자유낙하 최대 하강(m/초) = 풀다이브 234km/h
-    CanopySpeed      = 15.0,  -- 낙하산 무입력 하강(m/초) = 54km/h
+    AutoOpenAltitude = 360,   -- 낙하산 자동 개방이 시작되는 높이(m). 발밑 바닥(지면·옥상) 기준. 실제 전개는 CHUTE_OPEN_MS 뒤
+    FreefallSpeed    = 65.0,  -- 자유낙하 최대 하강(m/초) = Shift 다이브 234km/h
+    CanopySpeed      = 6.9,   -- 낙하산 무입력 하강(m/초) = 25km/h (이전 15.0 은 옛 웹 자료 54km/h)
     -- 수평 속도는 배그 수치(34 / 13)를 못 쓴다: 안티치트 한도(차량 밖 1초 평균 20타일/초) + 청크 스트리밍.
     -- 런 8(11-14): 16 / 13 으로 올렸더니 다음 칸이 안 올라와 수평 이동이 10초·4초씩 멈췄다 -> 런 6 값으로 되돌림
-    FreefallSteer    = 12.0,  -- 자유낙하 최대 수평(타일/초)
-    CanopySteer      = 8.0,   -- 낙하산 최대 수평(타일/초)
-    -- 관성 계수(1/초): v += (목표 - v) * Accel * dt. 배그 영상 실측에서 역산 (명세서 6절 시간 상수)
-    FreefallAccel    = 0.92,  -- 자유낙하: 2.5초에 정속의 90%
-    CanopyAccel      = 0.68,  -- 전개 후: 1.6초에 속도 절반 (226 -> 111 km/h, 목표 53)
+    FreefallSteer    = 12.0,  -- 자유낙하 최대 수평(타일/초) = 배그 122km/h x k(0.35). 올리면 모든 수평 값이 같이 커진다
+    CanopySteer      = 7.0,   -- 낙하산 W 수평(타일/초) = 배그 72km/h x k(0.35). FreefallSteer 를 올리면 같은 비율로 올릴 것
+    -- 관성 계수(1/초): v += (목표 - v) * Accel * dt (명세서 8.1절)
+    FreefallAccel    = 1.0,   -- 자유낙하: 4~5초에 정속 (Shift 174 -> 234 km/h 약 4초)
+    CanopyAccel      = 0.3,   -- 낙하산 하강: Shift 25 -> 54 km/h 약 10초, W+A/D 27 -> 52 약 5초
+    CanopyAccelH     = 1.0,   -- 낙하산 수평: 배그 실측 없음(임의). 하강과 같은 0.3 이면 W 를 눌러도 3초 넘게 굼뜨다
+    ChuteDecel       = 4.0,   -- 전개 직후 감속: 150 -> 약 27 km/h 가 1초 (배그 150 -> 18 약 1초, 232 -> 28 약 2초). 끝 기준은 CHUTE_DECEL_END
+    -- 회전(도/초). 샌드박스 같은 이름 옵션은 이 값에 가려 더 이상 쓰이지 않는다
+    FreefallTurnRate     = 180.0,  -- 자유낙하: 몸이 카메라 방향을 따라가는 속도
+    FreefallTurnRateKeys = 120.0,  -- 자유낙하: 카메라 값이 없을 때 A / D 회전 속도 (이전 샌드박스 기본값)
+    CanopyTurnRate       = 45.0,   -- 낙하산 A / D 선회 (한 바퀴 8초)
+    CanopyTurnRateFwd    = 60.0,   -- 낙하산 W + A / D 선회 (한 바퀴 6초)
 }
 
 -- 고정값이 있으면 그 값, 아니면 샌드박스 옵션 (등록된 옵션은 로드 후 항상 값이 있다 - fallback 불필요)
