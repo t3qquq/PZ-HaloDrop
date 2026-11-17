@@ -8,7 +8,8 @@
 --            바닐라 UI 는 그 위에 그대로 그려진다. 지도·기체 씬은 이 요소의 자식, 구름 덮개는 root:render 에서 맨 마지막.
 --   SkyTiles pzmap2dzi 아이소 렌더 타일(HaloDropMap.levels)을 직접 깐다 (Wingsmith 식). 배율 = 샌드박스 SkyScale(px/칸).
 --            타일이 없으면(HaloDropTiles.lua 부재) 아래 SkyMap 으로 대체.
---   SkyMap   UIWorldMap(바닐라 월드맵 벡터 렌더러, 아이소메트릭). 타일 없을 때의 폴백.
+--   SkyMap   UIWorldMap(바닐라 월드맵 벡터 렌더러 = M 키 지도). 11-17: SKY.TOP_DOWN 이면 북쪽이 위인 탑뷰(□),
+--            경로 A->B 를 화살표로 그리고 마우스 휠로 확대·축소. 열린 동안 바닐라 미니맵은 숨겼다가 닫을 때 탑승 직전 상태로 되돌린다.
 --   SkyScene ISUI3DScene 에 수송기 차량 스크립트 모델. 화면 가운데 고정, 기수만 돌림.
 --            UI3DScene 은 zoom 1 이어도 보이는 폭이 12.7 유닛(b42.21 :383 zoomMult, :2621 ortho 1366/zoomMult)이라
 --            53 m 짜리 C-17 은 getObjectScale("plane"):set(SCENE_SCALE) 로 객체 자체를 줄인다 (바닐라 SpriteModelEditor.lua:596 과 같은 방법).
@@ -160,7 +161,7 @@ function SkyMap:instantiate()
     end
     self.mapAPI:setBoundsFromWorld()
     MapUtils.initDefaultStyleV3(self)
-    self.mapAPI:setBoolean("Isometric", true)
+    self.mapAPI:setBoolean("Isometric", not K.TOP_DOWN)
     self.mapAPI:setBoolean("HideUnvisited", false)
     self.mapAPI:setBoolean("Players", false)
     self.mapAPI:setBoolean("RemotePlayers", false)
@@ -169,13 +170,52 @@ function SkyMap:instantiate()
     self.mapAPI:setBoolean("MiniMapSymbols", false)
     self.mapAPI:setBoolean("WorldBounds", false)
     self.mapAPI:setZoom(HaloDrop.opt("SkyZoom"))
-    log(string.format("sky: map ready data=%d zoom=%.1f iso=true", nData, HaloDrop.opt("SkyZoom")))
+    log(string.format("sky: map ready data=%d zoom=%.1f iso=%s", nData, HaloDrop.opt("SkyZoom"), tostring(not K.TOP_DOWN)))
 end
 
 function SkyMap:prerender()
     if S.cx and S.cy then
         self.mapAPI:centerOn(S.cx, S.cy)
     end
+end
+
+-- 경로 A->B: 지나온 구간은 흐리게, 남은 구간은 진하게, 끝(B)과 중간마다 화살촉
+local function arrowHead(el, x, y, ux, uy, size, a, r, g, b)
+    local px, py = -uy, ux
+    local bx, by = x - ux * size, y - uy * size
+    el:drawLine(nil, x, y, bx + px * size * 0.6, by + py * size * 0.6, K.ROUTE_W, a, r, g, b)
+    el:drawLine(nil, x, y, bx - px * size * 0.6, by - py * size * 0.6, K.ROUTE_W, a, r, g, b)
+end
+
+function SkyMap:render()
+    local fl = HaloDrop.C and HaloDrop.C.fl
+    if not fl or not S.px then return end
+    local api = self.mapAPI
+    local ax, ay = api:worldToUIX(fl.ax, fl.ay), api:worldToUIY(fl.ax, fl.ay)
+    local bx, by = api:worldToUIX(fl.bx, fl.by), api:worldToUIY(fl.bx, fl.by)
+    local px, py = api:worldToUIX(S.px, S.py), api:worldToUIY(S.px, S.py)
+    local dx, dy = bx - ax, by - ay
+    local len = math.sqrt(dx * dx + dy * dy)
+    if len < 1 then return end
+    local ux, uy = dx / len, dy / len
+    self:drawLine(nil, ax, ay, px, py, K.ROUTE_W, 0.35, 1, 1, 1)
+    self:drawLine(nil, px, py, bx, by, K.ROUTE_W, 0.95, 1, 1, 1)
+    local size = 18
+    local step = 220                                  -- 화면 px 마다 진행 방향 화살촉
+    local d = ((px - ax) * ux + (py - ay) * uy) + step
+    while d < len - size do
+        arrowHead(self, ax + ux * d, ay + uy * d, ux, uy, size * 0.7, 0.95, 1, 1, 1)
+        d = d + step
+    end
+    arrowHead(self, bx, by, ux, uy, size, 0.95, 1, 0.85, 0.2)
+end
+
+function SkyMap:onMouseWheelZoom(del)
+    local z = self.mapAPI:getZoomF() - del * K.ZOOM_STEP
+    if z < K.ZOOM_MIN then z = K.ZOOM_MIN elseif z > K.ZOOM_MAX then z = K.ZOOM_MAX end
+    self.mapAPI:setZoom(z)
+    if S.cx and S.cy then self.mapAPI:centerOn(S.cx, S.cy) end
+    return true
 end
 
 -- ── 기체 씬 ───────────────────────────────────────────────────────────────────
@@ -200,7 +240,11 @@ function SkyScene:createChildren()
     sc.onMouseMove = function() return true end
     sc.onRightMouseDown = function() return true end
     sc.onRightMouseUp = function() return true end
-    sc.onMouseWheel = function() return true end
+    -- 휠은 지도로 넘긴다 (기체 씬이 화면 가운데를 덮고 있다)
+    sc.onMouseWheel = function(_, del)
+        if S.map and S.map.onMouseWheel then S.map:onMouseWheel(del) end
+        return true
+    end
     self:addChild(sc)
     local j = sc.javaObject
     local ok, err = pcall(function()
@@ -249,9 +293,48 @@ function SkyRoot:new()
     return o
 end
 
+-- 바닐라 미니맵: 열 때 보이던 상태를 기억해 숨기고, 닫을 때 그 상태로 되돌린다 (서버 설정은 건드리지 않는다)
+local function miniMap()
+    local ok, mm = pcall(function() return getPlayerMiniMap(0) end)
+    if ok then return mm end
+    return nil
+end
+
+local function miniMapHide(first)
+    local mm = miniMap()
+    if not mm then return end
+    local vis = false
+    pcall(function() vis = mm:isReallyVisible() == true end)
+    if vis then
+        pcall(function() mm:removeFromUIManager() end)
+        if first then
+            S.miniMapWasVisible = true
+            log("sky: minimap hidden (was visible)")
+        elseif not S.miniMapWasVisible then
+            -- 탑승 중에 키로 켰다: 강하 후엔 켜진 상태로 돌려준다
+            S.miniMapWasVisible = true
+            log("sky: minimap re-hidden (turned on while aboard)")
+        end
+    end
+end
+
+local function miniMapRestore()
+    if not S.miniMapWasVisible then return end
+    S.miniMapWasVisible = nil
+    local mm = miniMap()
+    if not mm then return end
+    local ok, err = pcall(function()
+        if not mm:isReallyVisible() then mm:addToUIManager() end
+    end)
+    log("sky: minimap restored ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err))))
+end
+
 function SkyRoot:prerender()
     -- 열어 둔 사이 바닐라 ISWorldMap 이 닫히면서 setDrawWorld(true) 를 부를 수 있어 매 프레임 다시 끈다
-    if S.open then pcall(function() getWorld():setDrawWorld(false) end) end
+    if S.open then
+        pcall(function() getWorld():setDrawWorld(false) end)
+        miniMapHide(false)
+    end
 end
 
 -- 자식(지도·기체)을 다 그린 뒤에 불린다 -> 구름 덮개는 기체까지 덮는다
@@ -274,6 +357,7 @@ eatMouse(SkyRoot)
 eatMouse(SkyTiles)
 eatMouse(SkyMap)
 eatMouse(SkyScene)
+SkyMap.onMouseWheel = SkyMap.onMouseWheelZoom
 
 -- ── 공개 API ──────────────────────────────────────────────────────────────────
 function HaloDropSky.isOpen() return S.open end
@@ -290,8 +374,10 @@ function HaloDropSky.open()
     end
     S.open = true
     S.cover, S.coverTarget = 0, 0
-    S.cx, S.cy, S.yaw = nil, nil, nil
-    T.zoom, T.scale, T.tilt, T.yaw0 = K.SCENE_ZOOM, K.SCENE_SCALE, K.TILT, K.YAW0
+    S.cx, S.cy, S.yaw, S.px, S.py = nil, nil, nil, nil, nil
+    T.zoom, T.scale, T.tilt, T.yaw0 = K.SCENE_ZOOM, K.SCENE_SCALE, (K.TOP_DOWN and K.TILT_TOP or K.TILT), K.YAW0
+    S.miniMapWasVisible = nil
+    miniMapHide(true)
     local ok, err = pcall(function()
         getWorld():setDrawWorld(false)
         S.root = SkyRoot:new()
@@ -331,6 +417,7 @@ function HaloDropSky.close(reason)
         pcall(function() S.root:removeFromUIManager() end)
     end
     S.root, S.map, S.scene = nil, nil, nil
+    miniMapRestore()
     local wm = ISWorldMap_instance
     local mapOpen = false
     pcall(function() mapOpen = wm ~= nil and wm:isVisible() == true end)
@@ -343,13 +430,15 @@ function HaloDropSky.update(x, y, headingDeg, dt)
     if not S.open then return end
     -- 앞쪽을 더 보이게 중심을 진행 방향으로 조금 당긴다
     local r = math.rad(headingDeg)
+    S.px, S.py = x, y
     S.cx = x + math.cos(r) * K.LEAD
     S.cy = y + math.sin(r) * K.LEAD
     -- 기체 view yaw = 315 + 차량 yaw. 인게임 아이소 카메라는 viewRotation (30, 315, 0)(b42.21 TileGeometryUtils :20)이고
     -- UI3DScene.calcMatrices(:2655) 는 rotateXYZ(view) 뒤에 객체 변환을 곱하므로 월드에서 yaw φ 로 setAngles 한 차량의
     -- 모습 = 객체 0 + view yaw (315 + φ). 차량 yaw = HaloDropFlight.yaw = atan2(dx, dy) = 90 - headingDeg.
     -- (런 5 까지의 화면투영각 식은 근거가 없었고 기수가 진행 방향과 안 맞았다)
-    S.yaw = 315 + (90 - headingDeg)
+    -- 탑뷰(TOP_DOWN)는 카메라가 아이소에서 45도 돈 상태라 기본값만 바뀐다 (YAW_BASE_TOP)
+    S.yaw = (K.TOP_DOWN and K.YAW_BASE_TOP or K.YAW_BASE_ISO) + (90 - headingDeg)
     S.yaw = S.yaw - math.floor(S.yaw / 360) * 360
     -- 밤이면 타일을 어둡게 (바닐라 낮 밝기 0~1 을 TINT_NIGHT~1 로)
     local okD, day = pcall(function() return getClimateManager():getDayLightStrength() end)

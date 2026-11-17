@@ -165,6 +165,15 @@ HaloDrop.SKY = {
     SCENE_ZOOM = 3,      -- ISUI3DScene setZoom (1~20). 보이는 폭 = 1366/(e^(0.2*zoom)*88) 유닛: 3 -> 8.5
     SCENE_SCALE = 0.12,  -- 기체 객체 배율(getObjectScale). C-17 53 m x 0.12 = 6.4 유닛. 런 4: 배율 없이는 동체 조각만 보였다
     TILT       = 30,     -- 기체를 내려다보는 각도(도). 인게임 아이소 카메라와 같은 값 (TileGeometryUtils viewRotation (30,315,0))
+    -- 11-17: 지도는 M 키 월드맵과 같은 벡터 지도를 북쪽이 위인 탑뷰(□)로 보여준다 (배그 지도처럼). false 면 이전 아이소(◇)
+    TOP_DOWN   = true,
+    TILT_TOP   = 90,     -- 탑뷰일 때 기체를 내려다보는 각도(도). 90 = 바로 위에서
+    YAW_BASE_ISO = 315,  -- 기수 기본 식 view yaw = YAW_BASE + 차량 yaw. 아이소는 인게임 카메라 yaw 315
+    YAW_BASE_TOP = 0,    -- 탑뷰는 아이소에서 45도 돌린 값 (315 + 45). 기수가 경로 화살표와 안 맞으면 [ ] 키로 맞춰 YAW0 에 적는다
+    ZOOM_MIN   = 8.0,    -- 휠 확대·축소 범위 (UIWorldMap zoom). 시작값은 샌드박스 SkyZoom
+    ZOOM_MAX   = 20.0,
+    ZOOM_STEP  = 0.5,    -- 휠 한 칸당 zoom 변화
+    ROUTE_W    = 3,      -- 경로선 두께(px)
     YAW0       = 0,      -- 기수 방향 미세 보정(도). 기본 식은 view yaw = 315 + 차량 yaw(HaloDropFlight.yaw) -- 월드에서 setAngles 한
                          -- 차량을 아이소 카메라로 본 것과 같은 모습(UI3DScene.calcMatrices :2655 rotateXYZ 뒤에 객체 변환).
                          -- 런 5 까지는 YAW0 45 + 화면투영각이라 기수가 진행 방향과 안 맞았다. [ ] 키로 ±5 조정, 로그 sky tune:
