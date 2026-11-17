@@ -179,6 +179,27 @@ function SkyMap:prerender()
     end
 end
 
+-- 점 (ax,ay) 에서 단위벡터 (ux,uy) 방향 길이 len 인 선분이 사각형 안에 있는 거리 구간 [d0, d1]. 안 걸치면 nil
+local function clipToRect(ax, ay, ux, uy, len, x0, y0, x1, y1)
+    local t0, t1 = 0, len
+    local function edge(p, q)
+        if math.abs(p) < 1e-9 then return q >= 0 end
+        local r = q / p
+        if p < 0 then
+            if r > t1 then return false end
+            if r > t0 then t0 = r end
+        else
+            if r < t0 then return false end
+            if r < t1 then t1 = r end
+        end
+        return true
+    end
+    if edge(-ux, ax - x0) and edge(ux, x1 - ax) and edge(-uy, ay - y0) and edge(uy, y1 - ay) then
+        return t0, t1
+    end
+    return nil
+end
+
 -- 경로 A->B: 지나온 구간은 흐리게, 남은 구간은 진하게, 끝(B)과 중간마다 화살촉
 local function arrowHead(el, x, y, ux, uy, size, a, r, g, b)
     local px, py = -uy, ux
@@ -202,12 +223,21 @@ function SkyMap:render()
     self:drawLine(nil, px, py, bx, by, K.ROUTE_W, 0.95, 1, 1, 1)
     local size = 18
     local step = 220                                  -- 화면 px 마다 진행 방향 화살촉
-    local d = ((px - ax) * ux + (py - ay) * uy) + step
-    while d < len - size do
-        arrowHead(self, ax + ux * d, ay + uy * d, ux, uy, size * 0.7, 0.95, 1, 1, 1)
-        d = d + step
+    -- 화면 안에 걸리는 구간만 훑는다 (확대하면 경로가 화면의 수백 배라 전 구간을 돌면 프레임마다 수천 번 그린다)
+    local d0, d1 = clipToRect(ax, ay, ux, uy, len, -size, -size, self.width + size, self.height + size)
+    if d0 then
+        local dp = (px - ax) * ux + (py - ay) * uy      -- 수송기 위치. 화살촉은 그 앞쪽만
+        local first = dp + step
+        if first < d0 then first = dp + math.ceil((d0 - dp) / step) * step end
+        local d = first
+        while d <= d1 and d < len - size do
+            arrowHead(self, ax + ux * d, ay + uy * d, ux, uy, size * 0.7, 0.95, 1, 1, 1)
+            d = d + step
+        end
     end
-    arrowHead(self, bx, by, ux, uy, size, 0.95, 1, 0.85, 0.2)
+    if bx > -size and bx < self.width + size and by > -size and by < self.height + size then
+        arrowHead(self, bx, by, ux, uy, size, 0.95, 1, 0.85, 0.2)
+    end
 end
 
 function SkyMap:onMouseWheelZoom(del)
