@@ -7148,7 +7148,6 @@ AnimTicksPerSecond  {
 
 AnimationSet HaloDropDive {
  
-
  Animation {
   
   { Dummy01 }
@@ -7293,8 +7292,8 @@ AnimationSet HaloDropDive {
   AnimationKey R {
    0;
    2;
-   0;4;0.975542,0.000000,0.219811,-0.000001;;,
-   4800;4;0.975542,0.000000,0.219811,-0.000001;;;
+   0;4;0.975542,-0.000000,0.219811,-0.000001;;,
+   4800;4;0.975542,-0.000000,0.219811,-0.000001;;;
   }
 
   AnimationKey T {
@@ -8318,4 +8317,5 @@ AnimationSet HaloDropDive {
    4800;3;0.000000,0.000000,0.000000;;;
   }
  }
+
 }

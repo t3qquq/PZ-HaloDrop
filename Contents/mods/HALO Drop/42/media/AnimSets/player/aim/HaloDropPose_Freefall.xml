@@ -1,11 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 강하 자세 고정 (client/HaloDropPose.lua). 강하 중인 플레이어는 Lua 가 HaloDropPose 변수를
-     freefall / glide / dive / canopy 로 세운다. 붙잡기(hold) 중에는 낙하 속도가 0 이라 bFalling 이 꺼져
-     플레이어가 idle 계열 상태에 머물므로, 그 상태들에서 강하 클립을 직접 고른다.
-     freefall / glide / dive = HaloDropFreefall / HaloDropGlide / HaloDropDive (anims_X/Bob, 키 2개 정지 자세)
-     canopy = Bob_FallIdle 0.8배속 (퐁듀 좀비 공습 PongDuRainFall 과 같은 클립·속도: 팔을 든 Y자)
-     자세 설명은 client/HaloDropPose.lua 머리말에만 둔다 (자세를 바꿔도 이 파일은 안 고쳐도 되게).
-     클립은 anims_X/Bob 에 둔다: 42/media/anims_X 의 사용자 폴더는 common/media/anims_X 가 없으면 로드되지 않는다.
+<!-- 강하 자세 2D 블렌드 (client/HaloDropPose.lua). 강하 중인 플레이어는 Lua 가 HaloDropPose 변수와 블렌드 좌표 변수를 세운다.
+     붙잡기(hold) 중에는 낙하 속도가 0 이라 플레이어가 idle 계열 상태에 머물므로, 그 상태들에서 직접 고른다.
+     자세 배치·설명은 client/HaloDropPose.lua 머리말에만 둔다 (자세를 바꿔도 이 파일은 안 고쳐도 되게).
      m_ConditionPriority 2: 바닐라 노드(0)·ext(1)보다 먼저 고른다 (AnimNode.compareSelectionConditions).
      같은 파일이 player/{idle,turning,turning180,aim,ext,movement,strafe,run,sprint} 에 들어 있다 - 수정 시 전부 같이 바꿀 것. -->
 <animNode>
@@ -15,9 +11,121 @@
 	<m_Looped>true</m_Looped>
 	<m_SpeedScale>1.00</m_SpeedScale>
 	<m_BlendTime>0.30</m_BlendTime>
+	<m_Scalar>HaloDropFFX</m_Scalar>
+	<m_Scalar2>HaloDropFFY</m_Scalar2>
+	<m_2DBlends referenceID="1">
+		<m_AnimName>HaloDropFF_BrakeL</m_AnimName>
+		<m_XPos>-1.00</m_XPos>
+		<m_YPos>-1.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="2">
+		<m_AnimName>HaloDropFF_Brake</m_AnimName>
+		<m_XPos>0.00</m_XPos>
+		<m_YPos>-1.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="3">
+		<m_AnimName>HaloDropFF_BrakeR</m_AnimName>
+		<m_XPos>1.00</m_XPos>
+		<m_YPos>-1.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="4">
+		<m_AnimName>HaloDropFF_NeutralL</m_AnimName>
+		<m_XPos>-1.00</m_XPos>
+		<m_YPos>0.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="5">
+		<m_AnimName>HaloDropFreefall</m_AnimName>
+		<m_XPos>0.00</m_XPos>
+		<m_YPos>0.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="6">
+		<m_AnimName>HaloDropFF_NeutralR</m_AnimName>
+		<m_XPos>1.00</m_XPos>
+		<m_YPos>0.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="7">
+		<m_AnimName>HaloDropFF_GlideL</m_AnimName>
+		<m_XPos>-1.00</m_XPos>
+		<m_YPos>1.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="8">
+		<m_AnimName>HaloDropGlide</m_AnimName>
+		<m_XPos>0.00</m_XPos>
+		<m_YPos>1.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="9">
+		<m_AnimName>HaloDropFF_GlideR</m_AnimName>
+		<m_XPos>1.00</m_XPos>
+		<m_YPos>1.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
+	<m_2DBlends referenceID="10">
+		<m_AnimName>HaloDropDive</m_AnimName>
+		<m_XPos>0.00</m_XPos>
+		<m_YPos>2.00</m_YPos>
+		<m_SpeedScale>1.00</m_SpeedScale>
+	</m_2DBlends>
 	<m_Conditions>
 		<m_Name>HaloDropPose</m_Name>
 		<m_Type>STRING</m_Type>
 		<m_Value>freefall</m_Value>
 	</m_Conditions>
+	<m_2DBlendTri>
+		<node1>1</node1>
+		<node2>2</node2>
+		<node3>5</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>1</node1>
+		<node2>5</node2>
+		<node3>4</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>2</node1>
+		<node2>3</node2>
+		<node3>6</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>2</node1>
+		<node2>6</node2>
+		<node3>5</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>4</node1>
+		<node2>5</node2>
+		<node3>8</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>4</node1>
+		<node2>8</node2>
+		<node3>7</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>5</node1>
+		<node2>6</node2>
+		<node3>9</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>5</node1>
+		<node2>9</node2>
+		<node3>8</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>7</node1>
+		<node2>8</node2>
+		<node3>10</node3>
+	</m_2DBlendTri>
+	<m_2DBlendTri>
+		<node1>8</node1>
+		<node2>9</node2>
+		<node3>10</node3>
+	</m_2DBlendTri>
 </animNode>

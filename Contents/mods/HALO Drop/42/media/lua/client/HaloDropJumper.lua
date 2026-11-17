@@ -21,6 +21,7 @@
 --   자유낙하: heading(몸 방향)이 Viewpoint 카메라 방향을 FreefallTurnRate(180도/초)로 따라간다. Alt 를 누르는 동안은
 --     목표를 갱신하지 않는다(자유시점). W = 카메라 방향 활공(카메라가 아래를 볼수록 수직↑ 수평↓), S = 감속,
 --     A / D = 방향은 그대로 두고 옆으로 이동, 달리기 키(Shift) = 카메라와 무관한 최대 속도 다이브, Ctrl = 효과 없음.
+--     자세는 입력마다 HaloDropPose 2D 블렌드 목표로 넘기고, 블렌드가 연속으로 섞는다(HaloDropPose 머리말).
 --     카메라 값이 없으면(아이소·Viewpoint 0.1.7 미만) A / D 가 heading 을 돌린다(이전 방식).
 --   낙하산: 카메라는 조향에 쓰지 않는다. A / D = 선회(45도/초, W 와 같이면 60도/초 + 하강 2배),
 --     W = 전진, S = 거의 정지, 달리기 키 = 빠른 하강, Ctrl = 느린 하강 장거리 활공 (둘 다 W 유무와 무관).
@@ -885,13 +886,23 @@ local function onPlayerUpdate(p)
     if J.pitch < pitchTarget then J.pitch = math.min(pitchTarget, J.pitch + pr)
     elseif J.pitch > pitchTarget then J.pitch = math.max(pitchTarget, J.pitch - pr) end
 
-    -- 자세: Shift 다이브나 아래를 보며 W 면 머리부터 수직, W 활공이면 팔다리를 넓게 벌린 수평, 그 외(무입력·감속·옆 이동)는 기본 자세
-    if not canopy and not J.released then
-        local pose = "freefall"
-        if J.pitch > 0.5 then
-            if diving or (fwd and camDown > 0.6) then pose = "dive" else pose = "glide" end
+    -- 자세: 2D 블렌드 목표 (HaloDropPose 머리말). 값은 HaloDropPose 가 HaloDrop.POSE 속도로 따라간다
+    --   자유낙하 Y: S -1(감속 X자) / 무입력 0 / W 1(활공) ~ 2(카메라가 아래를 볼수록 다이브) / Shift 2(다이브)
+    --   자유낙하 X: A / D 옆 이동 -1 / +1 (몸 롤)
+    --   낙하산  X: A / D 선회 -1 / +1 (기울기), Y: S -1(플레어) / Ctrl SLOW_Y / 그 외 0
+    if not J.released then
+        if canopy then
+            local ty = 0
+            if back then ty = -1 elseif keyDown(KEY_SLOW) then ty = HaloDrop.POSE.CANOPY_SLOW_Y end
+            HaloDropPose.setTarget(p, turn, ty)
+        else
+            HaloDropPose.set(p, "freefall")
+            local ty = 0
+            if back then ty = -1 elseif diving then ty = 2 elseif fwd then ty = 1 + camDown end
+            local tx = 0
+            if strafing and not diving then tx = turn end
+            HaloDropPose.setTarget(p, tx, ty)
         end
-        HaloDropPose.set(p, pose)
     end
 
     -- 목표 속도 -> 관성으로 수렴

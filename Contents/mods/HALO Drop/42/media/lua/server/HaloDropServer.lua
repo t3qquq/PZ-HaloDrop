@@ -555,6 +555,14 @@ local function onClientCommand(module, command, player, args)
         local pose = args and args.pose or ""
         log("pose " .. tostring(player:getUsername()) .. " -> '" .. tostring(pose) .. "'")
         toClients("Pose", { oid = player:getOnlineID(), pose = pose })
+    elseif command == "PoseTarget" then
+        -- 강하 자세 블렌드 목표 중계 (HaloDropPose). 입력이 바뀔 때만 오므로 로그는 남기지 않는다
+        local x, y = tonumber(args and args.x), tonumber(args and args.y)
+        if not x or not y then
+            log("pose target ignored: bad args from " .. tostring(player:getUsername()))
+            return
+        end
+        toClients("PoseTarget", { oid = player:getOnlineID(), x = x, y = y })
     elseif command == "Cleanup" then
         chuteTake(player, "client cleanup")
     end
