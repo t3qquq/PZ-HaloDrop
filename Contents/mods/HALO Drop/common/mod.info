@@ -5,3 +5,6 @@ id=t3HaloDrop
 description=
 versionMin=42.21
 modversion=0.1.0
+javaJarFile=media/java/client/HaloDropClient.jar
+javaPkgName=halodropclient
+ZBVersionMin=2.0.0

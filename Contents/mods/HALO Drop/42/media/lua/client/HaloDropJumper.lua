@@ -901,6 +901,18 @@ local function onPlayerUpdate(p)
             if back then ty = -1 elseif diving then ty = 2 elseif fwd then ty = 1 + camDown end
             local tx = 0
             if strafing and not diving then tx = turn end
+            -- 다음 칸이 안 와서 수평 이동을 붙잡고 있는 동안은 무입력 자세로 둔다
+            -- (런 11-17: 17초·42초 정지 중에도 활공·다이브 자세라 제자리에서 머리부터 수직 낙하하는 모양이었다)
+            if J.blockedSince then
+                if not J.blockedPoseLogged then
+                    J.blockedPoseLogged = true
+                    log(string.format("pose: horizontal blocked -> neutral freefall pose (input target was x=%.1f y=%.1f)", tx, ty))
+                end
+                tx, ty = 0, 0
+            elseif J.blockedPoseLogged then
+                J.blockedPoseLogged = nil
+                log("pose: horizontal resumed -> input pose")
+            end
             HaloDropPose.setTarget(p, tx, ty)
         end
     end
