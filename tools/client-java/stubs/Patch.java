@@ -24,4 +24,7 @@ public @interface Patch {
 
     @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.PARAMETER)
     @interface Argument { int value() default 0; boolean readOnly() default true; }
+
+    @Retention(RetentionPolicy.RUNTIME) @Target(ElementType.PARAMETER)
+    @interface Return { boolean readOnly() default true; }
 }

@@ -16,6 +16,9 @@ import java.lang.reflect.Method;
  *   (RenderSettings.getAmbientForPlayer, the value vanilla uses for a vehicle with no square).
  *   Every other character is left untouched. Works for remote jumpers too (they get the variable from the relay).
  * Everything is reached by reflection so the jar needs no game jar to build.
+ * Viewpoint does not use that ambient for its 1st/3rd person view (run 11-17: override active, still black):
+ * it reads its own light grid at the character's square. PatchVpSky/PatchVpLight swap those lookups for the
+ * ground values below while a jumper is on that square. This class remembers where jumpers are (jumperAt).
  * The class and the hook methods must be public: ZombieBuddy inlines the @Patch advice into the game class
  * (zombie.core.skinnedmodel.model.ModelInstance), which is in another package (0.1.0 was package-private ->
  * IllegalAccessError on every character render).
@@ -31,6 +34,20 @@ public final class SkyLight {
     private static int errors;
     private static long nextStateLog;
     private static int applied;
+
+    // where airborne jumpers were drawn recently (game thread writes, Viewpoint threads read)
+    private static final int SLOTS = 8;
+    private static final long KEEP_MS = 1500L;
+    private static final int[] jx = new int[SLOTS], jy = new int[SLOTS], jz = new int[SLOTS];
+    private static final long[] jt = new long[SLOTS];
+    private static Method mGetX, mGetY, mGetZ;
+    // Viewpoint lookups called again for the ground square (z 0)
+    private static Method mVpSky, mVpLight;
+    private static boolean vpResolved, vpBroken;
+    private static final ThreadLocal<boolean[]> inVp = ThreadLocal.withInitial(() -> new boolean[1]);
+    private static int vpLogged;
+    private static long vpNextLog;
+    private static int vpSkySwaps, vpLightSwaps;
 
     private SkyLight() {}
 
@@ -59,6 +76,9 @@ public final class SkyLight {
         mRsAmbient = rs.getMethod("getAmbientForPlayer", int.class);
         Class<?> chr = Class.forName("zombie.characters.IsoGameCharacter", false, cl);
         mGetVar = chr.getMethod("getVariableString", String.class);
+        mGetX = chr.getMethod("getX");
+        mGetY = chr.getMethod("getY");
+        mGetZ = chr.getMethod("getZ");
         resolved = true;
         log("members resolved");
     }
@@ -98,7 +118,9 @@ public final class SkyLight {
     public static void onInstanceLights(Object inst) {
         if (!ready(inst)) return;
         try {
-            if (!inAir(fInstChar.get(inst))) return;
+            Object chr = fInstChar.get(inst);
+            if (!inAir(chr)) return;
+            remember(chr);
             Object[] pds = (Object[]) fInstPlayerData.get(inst);
             if (pds == null) return;
             float a = sky();
@@ -123,6 +145,102 @@ public final class SkyLight {
             fSlotB.setFloat(slot, a);
         } catch (Throwable t) {
             fail("slot ambient", t);
+        }
+    }
+
+    private static void remember(Object chr) {
+        try {
+            int x = (int) Math.floor(((Number) mGetX.invoke(chr)).doubleValue());
+            int y = (int) Math.floor(((Number) mGetY.invoke(chr)).doubleValue());
+            int z = (int) Math.floor(((Number) mGetZ.invoke(chr)).doubleValue());
+            long now = System.currentTimeMillis();
+            synchronized (jt) {
+                int slot = 0;
+                for (int i = 0; i < SLOTS; i++) {
+                    if (jx[i] == x && jy[i] == y && jz[i] == z) { slot = i; break; }
+                    if (jt[i] < jt[slot]) slot = i;
+                }
+                jx[slot] = x; jy[slot] = y; jz[slot] = z; jt[slot] = now;
+            }
+        } catch (Throwable t) {
+            fail("remember", t);
+        }
+    }
+
+    /** true when a jumper was drawn on or next to this square in the last KEEP_MS (z within 1 level) */
+    static boolean jumperAt(int x, int y, int z) {
+        long now = System.currentTimeMillis();
+        for (int i = 0; i < SLOTS; i++) {
+            if (now - jt[i] > KEEP_MS) continue;
+            if (Math.abs(jx[i] - x) <= 1 && Math.abs(jy[i] - y) <= 1 && Math.abs(jz[i] - z) <= 1) return true;
+        }
+        return false;
+    }
+
+    private static boolean vpReady() {
+        if (vpBroken) return false;
+        if (vpResolved) return true;
+        try {
+            Class<?> ol = Class.forName("viewpoint.light.OwnedLight", false, SkyLight.class.getClassLoader());
+            mVpSky = ol.getMethod("modelSky", int.class, int.class, int.class, boolean.class);
+            mVpLight = ol.getMethod("modelLightAt", int.class, int.class, int.class);
+            vpResolved = true;
+            log("viewpoint light lookups resolved");
+            return true;
+        } catch (Throwable t) {
+            vpBroken = true;
+            log("viewpoint light lookups not found, ground swap off: " + t);
+            return false;
+        }
+    }
+
+    private static void vpLog(String what, int x, int y, int z, Object orig, Object ground) {
+        if (vpLogged < 12) {
+            vpLogged++;
+            log("vp " + what + " swap at (" + x + "," + y + "," + z + ") orig=" + orig + " ground=" + ground);
+        }
+        long now = System.currentTimeMillis();
+        if (now >= vpNextLog) {
+            vpNextLog = now + 5000L;
+            log("vp ground swap active: sky=" + vpSkySwaps + " light=" + vpLightSwaps + " (last 5s)");
+            vpSkySwaps = 0;
+            vpLightSwaps = 0;
+        }
+    }
+
+    public static float vpSky(int x, int y, int z, boolean flag, float orig) {
+        if (z <= 0 || !jumperAt(x, y, z)) return orig;
+        boolean[] busy = inVp.get();
+        if (busy[0] || !vpReady()) return orig;
+        busy[0] = true;
+        try {
+            float g = ((Number) mVpSky.invoke(null, x, y, 0, flag)).floatValue();
+            vpSkySwaps++;
+            vpLog("sky", x, y, z, orig, g);
+            return g;
+        } catch (Throwable t) {
+            fail("vp sky", t);
+            return orig;
+        } finally {
+            busy[0] = false;
+        }
+    }
+
+    public static int vpLight(int x, int y, int z, int orig) {
+        if (z <= 0 || !jumperAt(x, y, z)) return orig;
+        boolean[] busy = inVp.get();
+        if (busy[0] || !vpReady()) return orig;
+        busy[0] = true;
+        try {
+            int g = ((Number) mVpLight.invoke(null, x, y, 0)).intValue();
+            vpLightSwaps++;
+            vpLog("light", x, y, z, "0x" + Integer.toHexString(orig), "0x" + Integer.toHexString(g));
+            return g;
+        } catch (Throwable t) {
+            fail("vp light", t);
+            return orig;
+        } finally {
+            busy[0] = false;
         }
     }
 }
