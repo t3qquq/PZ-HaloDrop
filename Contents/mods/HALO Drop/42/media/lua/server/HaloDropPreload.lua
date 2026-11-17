@@ -147,6 +147,124 @@ function HaloDropPreload.tick(R, now, findPlayer)
     end
 end
 
+-- ── 경로 미리 생성 (C안) ──────────────────────────────────────────────────────
+-- 셀을 요청해 다 올라오면(state 1) 요청을 멈춘다. 그러면 ServerMap.postupdate 가 플레이어 근처가 아닌 셀을
+-- 내리면서(Unload -> addSaveUnloadedJob) 청크를 저장한다. 다음에 같은 셀은 생성 없이 불러오기만 한다.
+-- 로딩 중에 요청을 멈추면 서버가 로딩을 취소하므로(postupdate cancelLoading) 끝날 때까지 매 틱 다시 부른다.
+
+-- 경로 A->B 양옆 halfW 칸 안에 걸치는 셀을 A 쪽부터 순서대로
+function HaloDropPreload.routeCells(fl, halfW)
+    local ax, ay, bx, by = fl.ax, fl.ay, fl.bx, fl.by
+    local dx, dy = bx - ax, by - ay
+    local len2 = dx * dx + dy * dy
+    if len2 < 1 then len2 = 1 end
+    local reach = halfW + CELL * 0.71    -- 셀 중심에서 모서리까지(반대각선)만큼 넉넉히
+    local cx0 = math.floor((math.min(ax, bx) - reach) / CELL)
+    local cx1 = math.floor((math.max(ax, bx) + reach) / CELL)
+    local cy0 = math.floor((math.min(ay, by) - reach) / CELL)
+    local cy1 = math.floor((math.max(ay, by) + reach) / CELL)
+    local list = {}
+    for cx = cx0, cx1 do
+        for cy = cy0, cy1 do
+            local px, py = cx * CELL + CELL / 2, cy * CELL + CELL / 2
+            local t = ((px - ax) * dx + (py - ay) * dy) / len2
+            local tc = t
+            if tc < 0 then tc = 0 elseif tc > 1 then tc = 1 end
+            local qx, qy = ax + dx * tc - px, ay + dy * tc - py
+            local d = math.sqrt(qx * qx + qy * qy)
+            if d <= reach then
+                list[#list + 1] = { key = cx .. "," .. cy, cx = cx, cy = cy, t = t, d = d }
+            end
+        end
+    end
+    table.sort(list, function(a, b)
+        if a.t ~= b.t then return a.t < b.t end
+        return a.d < b.d
+    end)
+    return list
+end
+
+function HaloDropPreload.hasAgent()
+    return HaloDropNative.state ~= false and HaloDropNative.state ~= nil
+        and HaloDropNative.preload ~= false and HaloDropNative.preload ~= nil
+end
+
+-- prep = { cells, next, inflight, done, cached, invalid, sumMs, maxMs, startAt }
+function HaloDropPreload.pregenNew(fl, now)
+    local P = HaloDrop.ROUTE_PREGEN
+    return {
+        cells = HaloDropPreload.routeCells(fl, P.HALF_WIDTH),
+        next = 1, inflight = {}, nInflight = 0,
+        done = 0, cached = 0, invalid = 0, sumMs = 0, maxMs = 0,
+        startAt = now,
+    }
+end
+
+-- 매 틱. 끝났으면 true
+function HaloDropPreload.pregenTick(prep, now)
+    local P = HaloDrop.ROUTE_PREGEN
+    local fnState, fnLoad = HaloDropNative.state, HaloDropNative.preload
+    -- 진행 중인 셀: 다 올라왔으면 놓아준다(내려가며 저장), 아니면 유지 요청
+    local finished = {}
+    for key, c in pairs(prep.inflight) do
+        local x, y = c.cx * CELL + 32, c.cy * CELL + 32
+        local st = fnState(x, y)
+        if st == 1 then
+            local ms = now - c.since
+            prep.done = prep.done + 1
+            prep.sumMs = prep.sumMs + ms
+            if ms > prep.maxMs then prep.maxMs = ms end
+            finished[#finished + 1] = key
+        elseif st == -1 or st == -2 then
+            prep.invalid = prep.invalid + 1
+            finished[#finished + 1] = key
+        else
+            fnLoad(x, y)
+        end
+    end
+    for i = 1, #finished do
+        prep.inflight[finished[i]] = nil
+        prep.nInflight = prep.nInflight - 1
+    end
+    -- 빈 자리만큼 다음 셀 요청
+    while prep.nInflight < P.MAX_PENDING and prep.next <= #prep.cells do
+        local c = prep.cells[prep.next]
+        prep.next = prep.next + 1
+        local x, y = c.cx * CELL + 32, c.cy * CELL + 32
+        local st = fnState(x, y)
+        if st == 1 then
+            prep.cached = prep.cached + 1          -- 이미 올라와 있다(플레이어 근처 등)
+        elseif st == -1 or st == -2 then
+            prep.invalid = prep.invalid + 1
+        else
+            fnLoad(x, y)
+            prep.inflight[c.key] = { cx = c.cx, cy = c.cy, since = now }
+            prep.nInflight = prep.nInflight + 1
+        end
+    end
+    return prep.next > #prep.cells and prep.nInflight == 0
+end
+
+-- 진행률. finished = 처리한 셀 수, eta = 남은 예상 ms (지금까지 처리 속도 기준, 모르면 -1)
+function HaloDropPreload.pregenProgress(prep, now)
+    local total = #prep.cells
+    local finished = prep.done + prep.cached + prep.invalid
+    local elapsed = now - prep.startAt
+    local eta = -1
+    if finished > 0 and elapsed > 0 then
+        eta = math.floor((total - finished) * elapsed / finished)
+    end
+    return finished, total, eta
+end
+
+function HaloDropPreload.pregenReport(prep, now)
+    local finished, total, eta = HaloDropPreload.pregenProgress(prep, now)
+    log(string.format("route pregen: %d/%d (generated=%d already-loaded=%d invalid=%d inflight=%d) avg=%dms max=%dms elapsed=%ds eta=%ss",
+        finished, total, prep.done, prep.cached, prep.invalid, prep.nInflight,
+        prep.done > 0 and math.floor(prep.sumMs / prep.done) or 0, prep.maxMs,
+        math.floor((now - prep.startAt) / 1000), eta >= 0 and tostring(math.floor(eta / 1000)) or "?"))
+end
+
 function HaloDropPreload.reset()
     _active = false
     _pendingSince = {}

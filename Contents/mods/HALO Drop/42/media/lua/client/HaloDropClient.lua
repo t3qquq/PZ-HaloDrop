@@ -7,6 +7,7 @@
 --   aboard   [key] = true  아직 수송기에 탄 사람
 --   jump     내 점프 수송기 { vid, x, y } (서버 JumpPlane, HaloDropPilot.lua 가 끈다). 없으면 nil
 --   ended    경로 끝 / 어드민 종료
+--   prep     경로 준비 중(출발 전) { ax, ay, bx, by, done, total, eta(ms, 모르면 -1) }. Flight 를 받으면 사라진다
 
 if isServer() then return end
 
@@ -111,6 +112,15 @@ function HaloDrop.onServerCommand(module, command, args)
         log(string.format("flight %d A=(%.0f,%.0f) B=(%.0f,%.0f) elapsed=%d dur=%d members=%d me=%s member=%s",
             C.id, C.fl.ax, C.fl.ay, C.fl.bx, C.fl.by, args.elapsed, C.fl.durMs, n, tostring(mine), tostring(amMember)))
         if amMember and HaloDropJumper then HaloDropJumper.board() end
+    elseif command == "Prep" then
+        -- 경로 준비 진행(출발 전). 탑승은 Flight 때 정해진다
+        if C.id ~= args.id or not C.prep then
+            resetCache()
+            C = HaloDrop.C
+            C.id = args.id
+            log(string.format("route prep %d A=(%.0f,%.0f) B=(%.0f,%.0f) cells=%d", args.id, args.ax, args.ay, args.bx, args.by, args.total))
+        end
+        C.prep = { ax = args.ax, ay = args.ay, bx = args.bx, by = args.by, done = args.done, total = args.total, eta = args.eta }
     elseif command == "ChuteWear" then
         if HaloDropJumper then HaloDropJumper.onChuteWear() end
     elseif command == "ChuteTake" then

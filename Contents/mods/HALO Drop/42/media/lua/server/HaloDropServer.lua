@@ -1,6 +1,9 @@
 -- Halo Drop 서버: 라운드 상태, 수송기 차량, 낙하산 아이템
 --
--- 라운드: IDLE(R=nil) -> 비행(R.ended=false) -> 종료(R.ended=true, 착지 대기) -> 정리(R=nil)
+-- 라운드: IDLE(R=nil) -> 경로 준비(R.prep, C안 11-17) -> 비행(R.ended=false) -> 종료(R.ended=true, 착지 대기) -> 정리(R=nil)
+--   경로 준비: 시작을 누르면 경로를 먼저 정하고 경로 양옆 셀을 서버가 미리 만들어 저장한다(HaloDropPreload.pregen*).
+--   다 되거나 ROUTE_PREGEN.MAX_WAIT_MS 가 지나거나 어드민이 Launch 를 보내면 출발(launchRound).
+--   탑승 인원은 출발 순간 탑승 구역 안에 있는 사람으로 정한다(준비 중에 들어온 사람도 탄다).
 -- 권위 분리
 --   서버: 라운드·탑승자 목록, 수송기 스폰·제거·물리 권한 이전, 낙하산 지급·회수
 --   클라: 자기 캐릭터의 위치·고도·낙하 속도 (HaloDropJumper.lua), 파일럿 클라의 차량 이동 (HaloDropPilot.lua)
@@ -382,23 +385,28 @@ local function pickFlight(speed)
 end
 
 -- ── 라운드 ────────────────────────────────────────────────────────────────────
-local function startRound(starter)
-    if R then
-        log("start ignored: round " .. tostring(R.id) .. " still open")
-        return
-    end
-    local speed = HaloDrop.opt("PlaneSpeed")
-    local zone = boardingZone()
-    local fl, box = pickFlight(speed)
-    _roundSeq = _roundSeq + 1
-    R = {
-        id = _roundSeq,
-        fl = fl,
-        startAt = nowMs() + HaloDrop.PREP_MS,
-        members = {},
-        jumps = {},
-        ended = false,
+local function prepArgs()
+    local finished, total, eta = HaloDropPreload.pregenProgress(R.prep, nowMs())
+    return {
+        id = R.id,
+        ax = R.fl.ax, ay = R.fl.ay, bx = R.fl.bx, by = R.fl.by,
+        done = finished, total = total, eta = eta,
     }
+end
+
+-- 출발: 탑승 인원을 정하고 Flight 방송. why = 로그용 (pregen done / timeout / admin / no agent / disabled)
+local function launchRound(why)
+    if not R or R.fl == nil or R.startAt then return end
+    local starter = R.starter
+    local box = R.box
+    local speed = R.fl.speed
+    local zone = boardingZone()
+    if R.prep then
+        HaloDropPreload.pregenReport(R.prep, nowMs())
+        log(string.format("round %d launch (%s) after %ds of route prep", R.id, tostring(why), math.floor((nowMs() - R.prep.startAt) / 1000)))
+        R.prep = nil
+    end
+    R.startAt = nowMs() + HaloDrop.PREP_MS
     if HaloDropPreload then HaloDropPreload.reset() end
     local n = 0
     local outside = {}
@@ -423,6 +431,59 @@ local function startRound(starter)
         R.fl.ax, R.fl.ay, R.fl.bx, R.fl.by, R.fl.length, speed, R.fl.durMs, n))
     -- 수송기 차량은 각자 점프하는 순간 그 자리에 띄운다 (jumpPlanesTick)
     toClients("Flight", flightArgs())
+end
+
+-- 시작: 경로를 정하고 경로 준비(C안)에 들어간다. 에이전트가 없거나 꺼져 있으면 바로 출발
+local function startRound(starter)
+    if R then
+        log("start ignored: round " .. tostring(R.id) .. " still open")
+        return
+    end
+    local speed = HaloDrop.opt("PlaneSpeed")
+    local fl, box = pickFlight(speed)
+    _roundSeq = _roundSeq + 1
+    R = {
+        id = _roundSeq,
+        fl = fl,
+        box = box,
+        starter = starter,
+        startAt = nil,          -- 출발 전(경로 준비 중)엔 nil
+        members = {},
+        jumps = {},
+        ended = false,
+    }
+    local G = HaloDrop.ROUTE_PREGEN
+    if not G or not G.ENABLED then
+        launchRound("route prep disabled")
+        return
+    end
+    if not HaloDropPreload or not HaloDropPreload.hasAgent() then
+        log("route prep: native agent missing -> launching without route prep")
+        launchRound("no agent")
+        return
+    end
+    local now = nowMs()
+    R.prep = HaloDropPreload.pregenNew(fl, now)
+    R.prepNextReport = now
+    log(string.format("round %d route prep by %s: A=(%.0f,%.0f) B=(%.0f,%.0f) len=%.0f halfWidth=%d cells=%d maxWait=%ds",
+        R.id, tostring(starter:getUsername()), fl.ax, fl.ay, fl.bx, fl.by, fl.length, G.HALF_WIDTH, #R.prep.cells,
+        math.floor(G.MAX_WAIT_MS / 1000)))
+    toClients("Prep", prepArgs())
+end
+
+local function prepTick(now)
+    local G = HaloDrop.ROUTE_PREGEN
+    local finished = HaloDropPreload.pregenTick(R.prep, now)
+    if now >= R.prepNextReport then
+        R.prepNextReport = now + G.REPORT_MS
+        HaloDropPreload.pregenReport(R.prep, now)
+        toClients("Prep", prepArgs())
+    end
+    if finished then
+        launchRound("route prep done")
+    elseif now - R.prep.startAt > G.MAX_WAIT_MS then
+        launchRound("route prep timeout")
+    end
 end
 
 local function endRound(reason)
@@ -456,6 +517,11 @@ local function onTick()
     chuteSweepTick()
     if not R then return end
     local now = nowMs()
+    if R.prep then
+        prepTick(now)
+        return
+    end
+    if not R.startAt then return end
     jumpPlanesTick()
     -- 서버 셀 미리 올리기 (HaloDropPreload.lua, 자바 에이전트가 있을 때만 동작)
     if HaloDropPreload then HaloDropPreload.tick(R, now, findPlayer) end
@@ -496,12 +562,22 @@ local function onClientCommand(module, command, player, args)
             return
         end
         startRound(player)
+    elseif command == "Launch" then
+        -- 경로 준비를 건너뛰고 바로 출발
+        if not isAdminPlayer(player) then
+            log("Launch denied for " .. tostring(player:getUsername()))
+            return
+        end
+        if R and R.prep then launchRound("admin " .. tostring(player:getUsername())) end
     elseif command == "Stop" then
         if not isAdminPlayer(player) then
             log("Stop denied for " .. tostring(player:getUsername()))
             return
         end
-        if R and R.ended then
+        if R and R.prep then
+            HaloDropPreload.pregenReport(R.prep, nowMs())
+            closeRound("admin stop during route prep")
+        elseif R and R.ended then
             closeRound("admin stop")
         else
             endRound("admin stop")

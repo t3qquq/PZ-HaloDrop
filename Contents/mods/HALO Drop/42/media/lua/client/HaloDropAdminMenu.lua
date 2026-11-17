@@ -21,7 +21,10 @@ local function onFill(playerNum, context, worldobjects, test)
     if not p or not canUse(p) then return end
     if test then return ISWorldObjectContextMenu.setTest() end
     local C = HaloDrop.C
-    if C and C.fl then
+    if C and C.prep then
+        context:addOption(getText("ContextMenu_HaloDrop_Launch"), p, onSelect, "Launch")
+        context:addOption(getText("ContextMenu_HaloDrop_Stop"), p, onSelect, "Stop")
+    elseif C and C.fl then
         context:addOption(getText("ContextMenu_HaloDrop_Stop"), p, onSelect, "Stop")
     else
         context:addOption(getText("ContextMenu_HaloDrop_Start"), p, onSelect, "Start")

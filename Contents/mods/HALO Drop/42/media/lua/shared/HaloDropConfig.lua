@@ -26,6 +26,19 @@ HaloDrop.JUMP_PLANE_SPEED    = 12            -- 점프 수송기 속도(타일/�
 HaloDrop.JUMP_PLANE_DROP_MS  = 600           -- 수송기가 보이기 시작한 뒤 뛰어내리기까지(ms). 구름이 걷히고 꼬리 뒤에 있는 장면을 잠깐 보여준다
 HaloDrop.JUMP_PLANE_MAX_MS   = 20000         -- 점프 수송기 최대 수명(서버). 클라 PlaneDone 이 안 와도 지운다
 -- 서버 셀(64x64칸) 미리 올리기 (server/HaloDropPreload.lua). 전용 서버를 -javaagent:HaloDropAgent.jar 로 띄웠을 때만 동작한다.
+-- 경로 미리 생성 (C안, 11-17): 처음 가는 지역은 서버가 청크를 새로 만들어야 해서 강하 중 수평 이동이 막힌다
+-- (같은 곳 두 번째 비행은 덜 막힘). 라운드 시작을 누르면 경로를 먼저 정하고, 수송기가 뜨기 전에 경로 양옆
+-- 셀(64x64칸)을 하나씩 올렸다 내려 저장해 둔다. 다 되면(또는 MAX_WAIT_MS, 또는 어드민 "준비 건너뛰고 출발") 출발.
+-- 서버 셀 로딩은 LoadChunk 스레드 하나가 FIFO 로 처리한다(ServerChunkLoader). MAX_PENDING 을 키워도
+-- 빨라지지 않고 플레이어 쪽 로딩만 뒤로 밀린다. 2 = 하나 끝나면 바로 다음이 들어가게 하는 최소값.
+HaloDrop.ROUTE_PREGEN = {
+    ENABLED     = true,
+    HALF_WIDTH  = 96,       -- 경로 중심선에서 양옆으로 미리 만들 거리(타일). 96 = 셀 1.5개 -> 폭 약 3~4셀
+    MAX_PENDING = 2,
+    MAX_WAIT_MS = 600000,   -- 준비 최대 시간(10분). 넘으면 남은 셀은 두고 출발
+    REPORT_MS   = 5000,     -- 진행 로그·방송 주기
+}
+
 HaloDrop.PRELOAD = {
     ENABLED      = true,
     AGENT_VERSION = 1.0,  -- server-agent/HaloDropAgent.jar 의 Agent.VERSION. jar 를 바꾸면 같이 올린다 (다르면 재설치 경고)

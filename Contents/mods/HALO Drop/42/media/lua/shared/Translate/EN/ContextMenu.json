@@ -1,4 +1,5 @@
 {
   "ContextMenu_HaloDrop_Start": "Halo Drop: Start round",
+  "ContextMenu_HaloDrop_Launch": "Halo Drop: Skip route prep and launch",
   "ContextMenu_HaloDrop_Stop": "Halo Drop: End round"
 }

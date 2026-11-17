@@ -33,8 +33,27 @@ local function lineFor(J)
     return nil
 end
 
+-- 경로 준비(출발 전) 진행률. 탑승 전이라 J.state 가 없다
+local function prepLine(P)
+    local eta = "?"
+    if P.eta and P.eta >= 0 then
+        local s = math.floor(P.eta / 1000)
+        eta = string.format("%d:%02d", math.floor(s / 60), s % 60)
+    end
+    return getText("IGUI_HaloDrop_RoutePrep", tostring(P.done), tostring(P.total), eta)
+end
+
 local function onPostUIDraw()
     local J = HaloDrop.J
+    local C = HaloDrop.C
+    if (not J or not J.state) and C and C.prep then
+        local text = prepLine(C.prep)
+        local x = getCore():getScreenWidth() / 2
+        local tm = getTextManager()
+        tm:DrawStringCentre(UIFont.Large, x + 2, 62, text, 0, 0, 0, 0.8)
+        tm:DrawStringCentre(UIFont.Large, x, 60, text, 1, 1, 1, 1)
+        return
+    end
     if not J or not J.state then return end
     local text = lineFor(J)
     if not text then return end
