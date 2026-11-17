@@ -16,8 +16,11 @@ import java.lang.reflect.Method;
  *   (RenderSettings.getAmbientForPlayer, the value vanilla uses for a vehicle with no square).
  *   Every other character is left untouched. Works for remote jumpers too (they get the variable from the relay).
  * Everything is reached by reflection so the jar needs no game jar to build.
+ * The class and the hook methods must be public: ZombieBuddy inlines the @Patch advice into the game class
+ * (zombie.core.skinnedmodel.model.ModelInstance), which is in another package (0.1.0 was package-private ->
+ * IllegalAccessError on every character render).
  */
-final class SkyLight {
+public final class SkyLight {
     static final String TAG = "[HaloDrop][SkyLight] ";
     static final String VAR = "HaloDropPose";
 
@@ -31,7 +34,7 @@ final class SkyLight {
 
     private SkyLight() {}
 
-    static void log(String s) { System.out.println(TAG + s); }
+    public static void log(String s) { System.out.println(TAG + s); }
 
     private static void fail(String where, Throwable t) {
         errors++;
@@ -92,7 +95,7 @@ final class SkyLight {
         }
     }
 
-    static void onInstanceLights(Object inst) {
+    public static void onInstanceLights(Object inst) {
         if (!ready(inst)) return;
         try {
             if (!inAir(fInstChar.get(inst))) return;
@@ -110,7 +113,7 @@ final class SkyLight {
         }
     }
 
-    static void onSlotInit(Object slot) {
+    public static void onSlotInit(Object slot) {
         if (!ready(slot)) return;
         try {
             if (!inAir(fSlotChar.get(slot))) return;
