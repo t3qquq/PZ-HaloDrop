@@ -1,0 +1,5 @@
+name=[ZEDGROUND] Round Manager
+id=t3RoundManager
+description=운영자 제어판·판 상태·캐릭터 초기화·사망 처리
+versionMin=42.21
+modversion=0.1.0
