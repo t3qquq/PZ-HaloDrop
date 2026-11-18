@@ -104,6 +104,13 @@ function HaloDropPose.get()
     return _mine
 end
 
+-- 내 자세 블렌드 현재값·목표값 (진단 로그용). 자세가 없으면 nil
+function HaloDropPose.blend()
+    local b = _blend.me
+    if not b then return nil end
+    return b.x, b.y, b.tx, b.ty
+end
+
 -- 점퍼가 매 틱 부른다: 이번 입력의 블렌드 목표 (자세 좌표계는 머리말 참고)
 function HaloDropPose.setTarget(p, x, y)
     local b = _blend.me

@@ -413,6 +413,53 @@ local function readCamera()
     return hdg, down, true
 end
 
+-- ── 자세 진단 (11-19 런: Shift 다이브 중 마우스를 좌우로 돌리면 팔이 기괴하게 꺾인다) ──────────
+-- 1초 tick 로그로는 원인이 안 잡혀서(twist=0/0, 클립 Glide-Dive 팔 차이 18도) 자유낙하 중 다이브 쪽(블렌드 Y > DIAG_Y)
+-- 이거나 Shift 를 누른 동안 DIAG_MS 간격으로 남긴다. 후보: 상하 조준 각도(updateVerticalAimAngle), 어깨 비틀기,
+-- 머리 돌리기, 다른 레이어에 섞여 들어오는 바닐라·Viewpoint 트랙. 점프마다 DIAG_MAX 줄까지.
+local DIAG_MS, DIAG_Y, DIAG_MAX = 50, 1.05, 1500
+local function trackText(p)
+    local parts = {}
+    for layer = 0, 3 do
+        for i = 0, 7 do
+            local okN, name = pcall(function() return p:dbgGetAnimTrackName(layer, i) end)
+            if not okN or name == nil or name == "" then break end
+            local okW, w = pcall(function() return p:dbgGetAnimTrackWeight(layer, i) end)
+            if okW and w and w >= 0.02 then
+                parts[#parts + 1] = string.format("L%d:%s=%.2f", layer, tostring(name), w)
+            end
+        end
+    end
+    return table.concat(parts, " ")
+end
+
+local function poseDiag(p, now, diving)
+    local bx, by, btx, bty = HaloDropPose.blend()
+    if not by then return end
+    if not diving and by <= DIAG_Y then return end
+    if J.diagNext and now < J.diagNext then return end
+    J.diagNext = now + DIAG_MS
+    J.diagCount = (J.diagCount or 0) + 1
+    if J.diagCount > DIAG_MAX then
+        if J.diagCount == DIAG_MAX + 1 then log("posediag: limit " .. DIAG_MAX .. " lines reached for this jump") end
+        return
+    end
+    local body = "?"
+    pcall(function()
+        body = string.format("anim=%.0f twist=%.1f/%.1f shoulder=%.1f vAim=%.1f/%.1f aiming=%s allowTwist=%s twisting=%s headLook=%s/%.2f/%.2f",
+            math.deg(p:getAnimAngleRadians()), p:getTwist(), p:getTargetTwist(), p:getShoulderTwist(),
+            p:getCurrentVerticalAimAngle(), p:getTargetVerticalAimAngle(), tostring(p:isAiming()),
+            tostring(p:allowsTwist()), tostring(p:isTwisting()), tostring(p:isHeadLookAround()),
+            p:getHeadLookHorizontal(), p:getHeadLookVertical())
+    end)
+    log(string.format("posediag t=%d dive=%s blend=(%.2f,%.2f)->(%.2f,%.2f) hdg=%.0f camT=%s eyeYaw=%s eyePitch=%s %s | %s",
+        now, tostring(diving), bx, by, btx, bty, J.heading or 0,
+        J.camTarget and string.format("%.0f", J.camTarget) or "nil",
+        _cam.ok and string.format("%.1f", _cam.yaw or 0) or "nil",
+        _cam.ok and string.format("%.1f", _cam.pitch or 0) or "nil",
+        body, trackText(p)))
+end
+
 -- tick 로그용 카메라 요약
 local function camText(p)
     local look = "?"
@@ -682,6 +729,7 @@ local function startJump(p, reason)
     local x, y = HaloDropFlight.pos(C.fl, now - C.t0)
     J.state = "JUMPING"
     J.x, J.y = x, y
+    J.diagCount, J.diagNext = 0, nil
     J.jump = { at = now, groundAt = nil, planeSeen = false, reason = reason }
     airFillReset()
     J.view = nil
@@ -958,6 +1006,7 @@ local function onPlayerUpdate(p)
                 log("pose: horizontal resumed -> input pose")
             end
             HaloDropPose.setTarget(p, tx, ty)
+            poseDiag(p, now, diving)
         end
     end
 
