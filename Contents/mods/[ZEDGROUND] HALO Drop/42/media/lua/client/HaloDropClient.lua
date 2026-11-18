@@ -23,7 +23,33 @@ local function myKey()
     return p and HaloDrop.playerKey(p) or nil
 end
 
-local function resetCache()
+-- ── 경로 준비 대기 음악 ──────────────────────────────────────────────────────
+-- Prep 을 받는 동안(출발 전) 메인 테마를 UI emitter 로 반복 재생한다. 캐시가 비워지면
+-- (Flight 수신 = 출발, Closed) 끈다. 2D 소리라 플레이어 위치와 무관하게 같은 크기로 들린다.
+local PREP_MUSIC = "halodrop_main_theme"
+local prepMusic = nil
+
+local function startPrepMusic()
+    local sm = getSoundManager()
+    if prepMusic and sm:isPlayingUISound(prepMusic) then return end
+    prepMusic = sm:playUISound(PREP_MUSIC)
+    if not prepMusic or prepMusic == 0 then
+        log("prep music: play failed (" .. PREP_MUSIC .. ")")
+        prepMusic = nil
+        return
+    end
+    log("prep music: start")
+end
+
+local function stopPrepMusic(why)
+    if not prepMusic then return end
+    getSoundManager():stopUISound(prepMusic)
+    prepMusic = nil
+    log("prep music: stop (" .. tostring(why) .. ")")
+end
+
+local function resetCache(why)
+    stopPrepMusic(why or "reset")
     HaloDrop.C = { aboard = {} }
 end
 
@@ -94,7 +120,7 @@ function HaloDrop.onServerCommand(module, command, args)
     if module ~= HaloDrop.MODULE then return end
     local C = HaloDrop.C
     if command == "Flight" then
-        resetCache()
+        resetCache("flight")
         C = HaloDrop.C
         C.id = args.id
         C.fl = { ax = args.ax, ay = args.ay, bx = args.bx, by = args.by, speed = args.speed, durMs = args.dur }
@@ -115,12 +141,13 @@ function HaloDrop.onServerCommand(module, command, args)
     elseif command == "Prep" then
         -- 경로 준비 진행(출발 전). 탑승은 Flight 때 정해진다
         if C.id ~= args.id or not C.prep then
-            resetCache()
+            resetCache("new prep")
             C = HaloDrop.C
             C.id = args.id
             log(string.format("route prep %d A=(%.0f,%.0f) B=(%.0f,%.0f) cells=%d", args.id, args.ax, args.ay, args.bx, args.by, args.total))
         end
         C.prep = { ax = args.ax, ay = args.ay, bx = args.bx, by = args.by, done = args.done, total = args.total, eta = args.eta }
+        startPrepMusic()
     elseif command == "ChuteWear" then
         if HaloDropJumper then HaloDropJumper.onChuteWear() end
     elseif command == "ChuteTake" then
@@ -143,7 +170,7 @@ function HaloDrop.onServerCommand(module, command, args)
         if HaloDropJumper then HaloDropJumper.onRoundEnd() end
     elseif command == "Closed" then
         log("round " .. tostring(C.id) .. " closed")
-        resetCache()
+        resetCache("closed")
     end
 end
 Events.OnServerCommand.Add(HaloDrop.onServerCommand)
