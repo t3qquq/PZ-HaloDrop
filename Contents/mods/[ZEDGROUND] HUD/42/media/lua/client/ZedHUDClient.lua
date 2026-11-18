@@ -28,7 +28,7 @@ local function createCompass()
     c:addToUIManager()
     c:setAlwaysOnTop(false)
     ZedHUD.compass = c
-    ZedHUD.log("compass created w=" .. tostring(ZedHUD.COMPASS.width))
+    ZedHUD.log("compass created w=" .. tostring(ZedHUD.compassWidth()) .. " h=" .. tostring(ZedHUD.COMPASS.height))
 end
 
 local function onGameStart()

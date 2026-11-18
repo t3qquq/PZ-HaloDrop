@@ -1,14 +1,18 @@
--- ZEDGROUND HUD : 상단 나침반 바
+-- ZEDGROUND HUD : 상단 나침반 바 (배그 방식)
+-- 눈금·숫자·방위 글자가 흐르고, 가운데 위의 아래로 향한 작은 화살표가 지금 보는 방향을 가리킨다.
+-- 방향 소스: Viewpoint 1·3인칭이면 카메라, 아이소면 캐릭터 정면 (ZedHUD.headingOf)
 require "ISUI/ISUIElement"
 
 ZedHUDCompass = ISUIElement:derive("ZedHUDCompass")
 
 function ZedHUDCompass:new(playerNum)
     local c = ZedHUD.COMPASS
-    local x = (getCore():getScreenWidth() - c.width) / 2
-    local o = ISUIElement.new(self, x, c.top, c.width, c.height)
+    local w = ZedHUD.compassWidth()
+    local x = (getCore():getScreenWidth() - w) / 2
+    local o = ISUIElement.new(self, x, c.top, w, c.height)
     o.playerNum = playerNum or 0
     o.anchorTop = true
+    o.lastSrc = nil
     return o
 end
 
@@ -23,8 +27,18 @@ end
 
 function ZedHUDCompass:recenter()
     local c = ZedHUD.COMPASS
-    self:setX((getCore():getScreenWidth() - c.width) / 2)
+    local w = ZedHUD.compassWidth()
+    self:setWidth(w)
+    self:setX((getCore():getScreenWidth() - w) / 2)
     self:setY(c.top)
+end
+
+-- 가운데 화살표: 아래로 좁아지는 사각형 줄로 그린 삼각형
+local function drawArrow(self, cx, h)
+    for i = 0, h - 1 do
+        local half = h - 1 - i
+        self:drawRect(cx - half, i, half * 2 + 1, 1, 1, 1, 1, 1)
+    end
 end
 
 function ZedHUDCompass:render()
@@ -33,35 +47,41 @@ function ZedHUDCompass:render()
 
     local c = ZedHUD.COMPASS
     local w, h = self.width, self.height
-    local cx = w / 2
+    local cx = math.floor(w / 2)
     local pxPerDeg = w / c.spanDeg
-    local heading = ZedHUD.headingOf(p)
+    local heading, src = ZedHUD.headingOf(p)
+    if src ~= self.lastSrc then
+        self.lastSrc = src
+        ZedHUD.log("compass: heading source -> " .. tostring(src))
+    end
     local half = c.spanDeg / 2
+    local barTop = c.arrowH + 1
+    local barH = h - barTop
 
-    self:drawRect(0, 0, w, h, 0.25, 0, 0, 0)
+    self:drawRect(0, barTop, w, barH, 0.30, 0, 0, 0)
+    drawArrow(self, cx, c.arrowH)
 
-    -- 보이는 범위의 첫 눈금
+    local fadePx = w * c.fadeFrac
     local start = math.floor((heading - half) / c.tickDeg) * c.tickDeg
     local deg = start
     while deg <= heading + half do
         local x = cx + (deg - heading) * pxPerDeg
-        local d = ZedHUD.norm(deg)
-        local isLabel = math.fmod(d, c.labelDeg) == 0
-        local tickH = isLabel and 6 or 3
-        self:drawRect(x, h - tickH - 2, 1, tickH, 0.8, 1, 1, 1)
-
-        if isLabel and math.abs(deg - heading) > c.hideNearDeg then
-            local name = ZedHUD.CARDINAL[d]
-            if name then
-                self:drawTextCentre(name, x, 2, 1, 1, 1, 1, UIFont.Medium)
-            else
-                self:drawTextCentre(tostring(d), x, 5, 1, 1, 1, 0.7, UIFont.Small)
+        if x >= 0 and x <= w then
+            local edge = math.min(x, w - x)
+            local a = edge >= fadePx and 1 or edge / fadePx
+            local d = ZedHUD.norm(deg)
+            local isLabel = math.fmod(d, c.labelDeg) == 0
+            local tickH = isLabel and 5 or 3
+            self:drawRect(x, h - tickH, 1, tickH, 0.7 * a, 1, 1, 1)
+            if isLabel then
+                local name = ZedHUD.CARDINAL[d]
+                if name then
+                    self:drawTextCentre(name, x, barTop, 1, 1, 1, a, UIFont.Medium)
+                else
+                    self:drawTextCentre(tostring(d), x, barTop + 3, 1, 1, 1, 0.75 * a, UIFont.Small)
+                end
             end
         end
         deg = deg + c.tickDeg
     end
-
-    -- 가운데 현재 방위
-    self:drawTextCentre(tostring(math.floor(heading + 0.5) % 360), cx, 2, 1, 0.85, 0.2, 1, UIFont.Medium)
-    self:drawRect(cx, h - 2, 1, 2, 1, 1, 0.85, 0.2)
 end
