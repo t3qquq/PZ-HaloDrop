@@ -102,6 +102,9 @@ HaloDrop.JUMP_READY = {
 -- 중력분(5.0 x dt)을 한 번 더 더해도 10fps 에서 1.2 + 0.5 = 1.7 로 여유가 있다.
 HaloDrop.LAND_SPEED   = 1.2
 HaloDrop.BRAKE_H      = 1.0
+-- 캐노피로 LOW_Z 아래(엔진 낙하)에 들어갈 때 화면 하강 속도를 붙잡기 구간 속도에서 LAND_SPEED 까지 올리는 시간
+-- (HaloDropJumper release). 3층을 약 3초에 내려온다. 이전엔 엔진 속도(vz/2.45, 3~6층/초)로 1초 안에 떨어졌다.
+HaloDrop.RELEASE_RAMP_MS = 1500
 
 -- ── 강하 모델 (PUBG 실측 11-16, claude/PUBG_강하_조작명세서.md 3절 / 8절) ──────────────────
 -- 환산 규칙(명세서 7절): 수직은 1:1(km/h / 3.6), 수평은 배그 값 x k (k = FreefallSteer / 34), 회전·시간 상수는 1:1.

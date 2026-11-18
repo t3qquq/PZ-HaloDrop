@@ -1011,7 +1011,12 @@ local function onPlayerUpdate(p)
         if not J.released then
             J.released = true
             HaloDropPose.set(p, nil)   -- 엔진 낙하 구간은 바닐라 낙하·착지 애니메이션에 맡긴다
-            log(string.format("release to engine fall at z=%.1f state=%s vz=%.1f", p:getZ(), J.state, J.vz))
+            -- 붙잡기 구간은 가상 고도 약 53m 가 1층이라 화면에선 0.2층/초 남짓으로 내려오다가, 엔진 낙하(1층 = 2.45m)로
+            -- 넘어가는 순간 같은 속도가 20배 넘게 빨라 보였다(11-18 d27c7e2: z 3.05 -> 0.26 을 1초에).
+            -- 캐노피면 놓는 순간의 화면 속도에서 LAND_SPEED 까지 RELEASE_RAMP_MS 에 걸쳐 올린다.
+            J.relAt = now
+            J.relRate = visualZ(carryAltM() + J.vz) - lowZ()
+            log(string.format("release to engine fall at z=%.1f state=%s vz=%.1f held=%.2f floors/s", p:getZ(), J.state, J.vz, J.relRate))
         end
         -- 놓기: 엔진이 z 를 내린다. 수평 위치와 낙하 속도만 정한다.
         p:setForceX(J.x)
@@ -1023,6 +1028,11 @@ local function onPlayerUpdate(p)
             return
         end
         local v = J.vz / HaloDrop.M_PER_FLOOR
+        if canopy then
+            local k = math.min(1, (now - (J.relAt or now)) / HaloDrop.RELEASE_RAMP_MS)
+            local held = math.min(J.relRate or 0, HaloDrop.LAND_SPEED)
+            v = held + (HaloDrop.LAND_SPEED - held) * k
+        end
         if h < HaloDrop.BRAKE_H and canopy then v = HaloDrop.LAND_SPEED end
         p:setLastFallSpeed(v)
     end
