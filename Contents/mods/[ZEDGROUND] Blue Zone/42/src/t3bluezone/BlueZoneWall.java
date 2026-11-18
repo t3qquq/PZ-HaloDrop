@@ -1,10 +1,7 @@
 package t3bluezone;
 
-import viewpoint.api.Addon;
-import viewpoint.api.AddonContext;
-import viewpoint.api.Registration;
-import viewpoint.api.render.DrawContext;
-import viewpoint.api.render.DrawPoint;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import viewpoint.api.render.FrameView;
 import viewpoint.api.render.Gpu;
 import viewpoint.api.render.GpuBuffer;
@@ -14,11 +11,19 @@ import viewpoint.api.render.Primitive;
 import viewpoint.api.view.Vec3;
 
 /**
- * ZEDGROUND Blue Zone: the blue zone wall in Viewpoint 1st/3rd person (Viewpoint addon API 1.0.0, no ZombieBuddy).
+ * ZEDGROUND Blue Zone: the blue zone wall in Viewpoint 1st/3rd person.
  *
  * Isometric view keeps the Lua ground line (BlueZoneDisplay.lua). In Viewpoint the vanilla isoToScreen projection does
- * not match the 3D camera, so the wall is drawn here in Viewpoint's own pass (DrawPoint.AFTER_TRANSLUCENT) with the
- * frame's view and projection matrices.
+ * not match the 3D camera, so the wall is drawn in Viewpoint's own pass with the frame's view and projection matrices.
+ *
+ * Loading (0.3.0, 11-19): ZombieBuddy loads this jar at server join (mod.info javaJarFile) and PatchVpWall calls
+ * afterTranslucent() at the end of viewpoint.render.AddonDraws.afterTranslucent. 0.1/0.2 were a Viewpoint addon
+ * (media/viewpoint/addons): Viewpoint only discovers addons among the mods enabled at the main menu, so a server mod
+ * that is turned on by joining never loaded (run 11-18: "Viewpoint.Addons[t3bluezone] missing" the whole session).
+ * Viewpoint's own pieces are reached by reflection, mirroring AddonDraws.world/run (javap of the 11-19 jar):
+ *   AddonDraws.view(FrameContext) -> FrameView, WorldRenderer.bindTarget(), an AddonGpu(owner, id) with begin()/end().
+ * The public viewpoint.api types (Gpu, GpuProgram, FrameView ...) are used directly. GL blend / depth state is set and
+ * restored here (AddonGpu.draw does not touch it). Zone state comes from Lua's BlueZone.C (ZoneState).
  *
  * Geometry: only the arc of the current blue circle near the player (ARC_HALF tiles each side, at most MAX_QUADS quads),
  * a vertical band from camera height - BELOW to + ABOVE. Rebuilt and uploaded every frame.
@@ -31,7 +36,7 @@ import viewpoint.api.view.Vec3;
  * The first one that puts the player within MATCH_TILES of the camera wins and is logged. Height is the Y axis.
  * If none matches, nothing is drawn and the numbers are logged every 5 s.
  */
-public final class BlueZoneWall implements Addon {
+public final class BlueZoneWall {
     static final String TAG = "[BlueZone][VP] ";
 
     static final float ARC_HALF = 400f;      // tiles of arc each side of the player
@@ -85,13 +90,23 @@ public final class BlueZoneWall implements Addon {
             "    fragColor = vec4(c, clamp(a, 0.0, 0.92));\n" +
             "}\n";
 
-    private Registration reg;
+    static final int OWNER = 0x7B1E;          // AddonGpu owner number (only used by Viewpoint's own timers, which we skip)
+
+    private static final BlueZoneWall INSTANCE = new BlueZoneWall();
+
     private GpuProgram program;
     private GpuBuffer buffer;
     private GpuMesh mesh;
     private boolean broken;
     private int errors;
     private final float[] verts = new float[MAX_QUADS * VERTS_PER_QUAD * FLOATS_PER_VERT];
+
+    // Viewpoint internals (reflection, resolved on the first frame)
+    private boolean vpResolved;
+    private Method mView, mBind, mBegin, mEnd;
+    private Gpu gpu;
+    private Method glIsEnabled, glEnable, glDisable, glBlendFunc, glDepthMask, glGetBoolean, glGetInteger;
+    private boolean firstDrawLogged;
 
     // axis mapping (render thread only)
     private int mapping = -1;          // bit0 swap x/y, bit1 flip depth, bit2 subtract scene origin
@@ -101,20 +116,47 @@ public final class BlueZoneWall implements Addon {
 
     public static void log(String s) { System.out.println(TAG + s); }
 
-    @Override
-    public void enable(AddonContext ctx) {
-        log("enable v" + ZoneState.VERSION + " id=" + ctx.id());
-        reg = ctx.render().draw(DrawPoint.AFTER_TRANSLUCENT, this::draw);
-        log("draw registered at AFTER_TRANSLUCENT");
+    /** called by PatchVpWall at the end of AddonDraws.afterTranslucent (Viewpoint render thread) */
+    public static void afterTranslucent(Object frame) {
+        INSTANCE.draw(frame);
     }
 
-    @Override
-    public void disable() {
-        log("disable");
-        if (reg != null) reg.close();
-        reg = null;
-        closeGpu();
+    private boolean resolveVp(Object frame) {
+        if (vpResolved) return true;
+        try {
+            ClassLoader cl = frame.getClass().getClassLoader();
+            Class<?> ad = Class.forName("viewpoint.render.AddonDraws", false, cl);
+            mView = ad.getDeclaredMethod("view", frame.getClass());
+            mView.setAccessible(true);
+            mBind = Class.forName("viewpoint.render.WorldRenderer", false, cl).getMethod("bindTarget");
+            Class<?> ag = Class.forName("viewpoint.render.AddonGpu", false, cl);
+            Constructor<?> ctor = ag.getDeclaredConstructor(int.class, String.class);
+            ctor.setAccessible(true);
+            mBegin = ag.getDeclaredMethod("begin");
+            mBegin.setAccessible(true);
+            mEnd = ag.getDeclaredMethod("end");
+            mEnd.setAccessible(true);
+            gpu = (Gpu) ctor.newInstance(OWNER, "t3bluezone");
+            Class<?> gl = Class.forName("org.lwjgl.opengl.GL11", false, cl);
+            glIsEnabled = gl.getMethod("glIsEnabled", int.class);
+            glEnable = gl.getMethod("glEnable", int.class);
+            glDisable = gl.getMethod("glDisable", int.class);
+            glBlendFunc = gl.getMethod("glBlendFunc", int.class, int.class);
+            glDepthMask = gl.getMethod("glDepthMask", boolean.class);
+            glGetBoolean = gl.getMethod("glGetBoolean", int.class);
+            glGetInteger = gl.getMethod("glGetInteger", int.class);
+            vpResolved = true;
+            log("viewpoint hooks resolved (AddonDraws.view, WorldRenderer.bindTarget, AddonGpu, GL11)");
+            return true;
+        } catch (Throwable t) {
+            broken = true;
+            log("viewpoint hooks FAILED, wall off (Viewpoint changed?): " + t);
+            return false;
+        }
     }
+
+    static final int GL_BLEND = 0x0BE2, GL_DEPTH_TEST = 0x0B71, GL_CULL_FACE = 0x0B44, GL_DEPTH_WRITEMASK = 0x0B72;
+    static final int GL_BLEND_SRC = 0x0BE1, GL_BLEND_DST = 0x0BE0, GL_SRC_ALPHA = 0x0302, GL_ONE_MINUS_SRC_ALPHA = 0x0303;
 
     private void closeGpu() {
         try { if (mesh != null) mesh.close(); } catch (Throwable ignored) { }
@@ -206,12 +248,12 @@ public final class BlueZoneWall implements Addon {
         Vec3 e = v.eye(), o = v.sceneOrigin();
         log("axes " + why + ": camera(view)=(" + f1(cam[0]) + "," + f1(cam[1]) + "," + f1(cam[2]) + ") colMajor=" + (cam[3] > 0)
                 + " eye=" + vec(e) + " sceneOrigin=" + vec(o)
-                + " player=(" + f1(ZoneState.playerX()) + "," + f1(ZoneState.playerY()) + "," + f1(ZoneState.playerZ()) + ")");
+                + " player=(" + f1(ZoneState.px) + "," + f1(ZoneState.py) + "," + f1(0) + ")");
     }
 
     private boolean matchAxes(double[] cam, FrameView v) {
-        if (!ZoneState.hasPlayer()) { diag("waiting for player position from Lua", cam, v); return false; }
-        double px = ZoneState.playerX(), py = ZoneState.playerY();
+        if (!ZoneState.hasPlayer) { diag("waiting for player position from Lua", cam, v); return false; }
+        double px = ZoneState.px, py = ZoneState.py;
         if (mapping >= 0) {
             double[] r = toRender(mapping, px, py, v.sceneOrigin());
             if (Math.hypot(r[0] - cam[0], r[1] - cam[2]) <= RECHECK_TILES) return true;
@@ -236,25 +278,60 @@ public final class BlueZoneWall implements Addon {
 
     // ── draw ───────────────────────────────────────────────────
 
-    private void draw(DrawContext dc) {
+    private void draw(Object frame) {
         if (broken) return;
         double[] blue = ZoneState.currentBlue();
         if (blue == null || blue[2] < 1) return;
+        if (!resolveVp(frame)) return;
         try {
-            FrameView v = dc.view();
+            FrameView v = (FrameView) mView.invoke(null, frame);
             float[] view = v.view(), proj = v.projection();
             double[] cam = cameraFromView(view);
             if (!matchAxes(cam, v)) return;
             int quads = buildArc(blue, cam, v);
             stats(quads);
             if (quads == 0) return;
-            if (!gpuReady(dc.gpu())) return;
-            buffer.upload(verts);
-            program.setMatrix("uView", view)
-                   .setMatrix("uProj", proj)
-                   .set("uColor", COLOR)
-                   .set("uTime", (float) (v.seconds() % 1000.0));
-            dc.gpu().draw(program, mesh, Primitive.TRIANGLES, 0, quads * VERTS_PER_QUAD);
+            mBind.invoke(null);
+            mBegin.invoke(gpu);
+            boolean blend = false, depthTest = false, cull = false, depthWrite = true;
+            int src = GL_SRC_ALPHA, dst = GL_ONE_MINUS_SRC_ALPHA;
+            boolean saved = false;
+            try {
+                if (!gpuReady(gpu)) return;
+                blend = (Boolean) glIsEnabled.invoke(null, GL_BLEND);
+                depthTest = (Boolean) glIsEnabled.invoke(null, GL_DEPTH_TEST);
+                cull = (Boolean) glIsEnabled.invoke(null, GL_CULL_FACE);
+                depthWrite = (Boolean) glGetBoolean.invoke(null, GL_DEPTH_WRITEMASK);
+                src = (Integer) glGetInteger.invoke(null, GL_BLEND_SRC);
+                dst = (Integer) glGetInteger.invoke(null, GL_BLEND_DST);
+                saved = true;
+                glEnable.invoke(null, GL_BLEND);
+                glBlendFunc.invoke(null, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                glEnable.invoke(null, GL_DEPTH_TEST);     // buildings in front hide the wall
+                glDepthMask.invoke(null, false);          // the see-through wall does not hide what is behind it
+                glDisable.invoke(null, GL_CULL_FACE);     // both sides: seen from inside and outside the zone
+                buffer.upload(verts);
+                program.setMatrix("uView", view)
+                       .setMatrix("uProj", proj)
+                       .set("uColor", COLOR)
+                       .set("uTime", (float) (v.seconds() % 1000.0));
+                gpu.draw(program, mesh, Primitive.TRIANGLES, 0, quads * VERTS_PER_QUAD);
+                if (!firstDrawLogged) {
+                    firstDrawLogged = true;
+                    log("first wall draw: quads=" + quads + " blue=(" + f1(blue[0]) + "," + f1(blue[1]) + " r" + f1(blue[2])
+                            + ") gl before: blend=" + blend + " depthTest=" + depthTest + " cull=" + cull + " depthWrite=" + depthWrite);
+                }
+            } finally {
+                if (saved) {
+                    if (!blend) glDisable.invoke(null, GL_BLEND);
+                    glBlendFunc.invoke(null, src, dst);
+                    if (!depthTest) glDisable.invoke(null, GL_DEPTH_TEST);
+                    glDepthMask.invoke(null, depthWrite);
+                    if (cull) glEnable.invoke(null, GL_CULL_FACE);
+                }
+                mEnd.invoke(gpu);
+                mBind.invoke(null);
+            }
         } catch (Throwable t) {
             fail("draw", t);
         }
@@ -263,7 +340,7 @@ public final class BlueZoneWall implements Addon {
     /** fills verts with the arc of the blue circle facing the player; returns the quad count */
     private int buildArc(double[] blue, double[] cam, FrameView v) {
         double cx = blue[0], cy = blue[1], r = blue[2];
-        double px = ZoneState.playerX(), py = ZoneState.playerY();
+        double px = ZoneState.px, py = ZoneState.py;
         double dx = px - cx, dy = py - cy;
         double dist = Math.sqrt(dx * dx + dy * dy);
         if (Math.abs(dist - r) > SHOW_RANGE) { skippedFar++; return 0; }

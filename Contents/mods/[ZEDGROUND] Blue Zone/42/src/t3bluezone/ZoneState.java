@@ -1,77 +1,108 @@
 package t3bluezone;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+
 /**
- * Blue Zone state shared between the Lua export (game thread) and the draw callback (render thread).
- * The current blue circle is interpolated here from the last snapshot and the local clock,
- * the same way BlueZoneClient.lua does it (remain counts down from the moment the snapshot arrived).
+ * Blue Zone state for the wall, read straight from Lua and the game (no Lua -> Java bridge).
+ *
+ * Lua: the global table BlueZone.C (BlueZoneClient.lua) is the last server snapshot. It is replaced as a whole on every
+ * State and set to nil on Stopped, never edited in place, so reading its fields from the render thread sees one snapshot.
+ * Fields used: phase, seg, dur, remain, paused, recvAt (getTimestampMs = System.currentTimeMillis), fx fy fr, wx wy wr.
+ * The blue circle exists from the phase 1 shrink on (BlueZone.blueActive in BlueZoneConfig.lua): nothing to draw
+ * during the phase 1 wait. During "shrink" it moves from f* to w* linearly, as BlueZone.blueAt does.
+ * Player: IsoPlayer.getInstance() x / y, used to match Viewpoint's render axes and to pick the arc near the player.
+ * Everything is reached by reflection (Kahlua table / game classes), so the jar needs no game jar to build.
  */
 public final class ZoneState {
-    public static final String VERSION = "0.2.0";
-
     private ZoneState() {}
 
-    /** immutable snapshot */
-    static final class Snap {
-        final double fx, fy, fr, wx, wy, wr, durMs, remainMs;
-        final boolean shrinking, paused;
-        final long recvAt;
+    private static boolean resolved, broken;
+    private static Field fEnv;
+    private static Method mRawget, mGetInstance, mGetX, mGetY;
+    private static int errors;
+    private static String lastState = "";
 
-        Snap(double fx, double fy, double fr, double wx, double wy, double wr,
-             double durMs, double remainMs, boolean shrinking, boolean paused, long recvAt) {
-            this.fx = fx; this.fy = fy; this.fr = fr;
-            this.wx = wx; this.wy = wy; this.wr = wr;
-            this.durMs = durMs; this.remainMs = remainMs;
-            this.shrinking = shrinking; this.paused = paused;
-            this.recvAt = recvAt;
+    static double px, py;
+    static boolean hasPlayer;
+
+    private static void fail(String where, Throwable t) {
+        errors++;
+        if (errors <= 5) BlueZoneWall.log("state " + where + " failed (" + errors + "): " + t);
+        if (errors >= 20) {
+            broken = true;
+            BlueZoneWall.log("state reading off after " + errors + " errors");
         }
     }
 
-    private static volatile Snap snap;
-    private static volatile double px, py, pz;
-    private static volatile long playerAt;
-    private static int setLogged;
-
-    public static void set(double fx, double fy, double fr, double wx, double wy, double wr,
-                           double durMs, double remainMs, boolean shrinking, boolean paused) {
-        Snap prev = snap;
-        snap = new Snap(fx, fy, fr, wx, wy, wr, durMs, remainMs, shrinking, paused, System.currentTimeMillis());
-        boolean changed = prev == null || prev.shrinking != shrinking || prev.paused != paused || prev.fr != fr || prev.wr != wr;
-        if (changed && setLogged < 40) {
-            setLogged++;
-            BlueZoneWall.log("zone set: blue=(" + r0(fx) + "," + r0(fy) + " r" + r0(fr) + ") white=(" + r0(wx) + "," + r0(wy) + " r" + r0(wr)
-                    + ") dur=" + r0(durMs) + "ms remain=" + r0(remainMs) + "ms shrinking=" + shrinking + " paused=" + paused);
+    private static boolean resolve() {
+        if (resolved) return true;
+        if (broken) return false;
+        try {
+            ClassLoader cl = ZoneState.class.getClassLoader();
+            Class<?> lm = Class.forName("zombie.Lua.LuaManager", false, cl);
+            fEnv = lm.getField("env");
+            Class<?> kt = Class.forName("se.krka.kahlua.vm.KahluaTable", false, cl);
+            mRawget = kt.getMethod("rawget", Object.class);
+            Class<?> ip = Class.forName("zombie.characters.IsoPlayer", false, cl);
+            mGetInstance = ip.getMethod("getInstance");
+            mGetX = ip.getMethod("getX");
+            mGetY = ip.getMethod("getY");
+            resolved = true;
+            BlueZoneWall.log("state lookups resolved (LuaManager.env, KahluaTable.rawget, IsoPlayer.getInstance)");
+            return true;
+        } catch (Throwable t) {
+            broken = true;
+            BlueZoneWall.log("state lookups FAILED, wall off: " + t);
+            return false;
         }
     }
 
-    public static void clear() {
-        if (snap != null) BlueZoneWall.log("zone cleared");
-        snap = null;
+    private static Object get(Object table, String key) throws Exception {
+        return table == null ? null : mRawget.invoke(table, key);
     }
 
-    public static void player(double x, double y, double z) {
-        px = x; py = y; pz = z;
-        playerAt = System.currentTimeMillis();
+    private static double num(Object table, String key) throws Exception {
+        Object v = get(table, key);
+        return v instanceof Number ? ((Number) v).doubleValue() : Double.NaN;
     }
 
-    static boolean hasPlayer() {
-        return playerAt != 0 && System.currentTimeMillis() - playerAt < 5000L;
-    }
-
-    static double playerX() { return px; }
-    static double playerY() { return py; }
-    static double playerZ() { return pz; }
-
-    /** current blue circle {cx, cy, r} in world tiles, or null when there is no round */
+    /** current blue circle {cx, cy, r} in world tiles, or null when there is none (no round / phase 1 wait / error) */
     static double[] currentBlue() {
-        Snap s = snap;
-        if (s == null) return null;
-        if (!s.shrinking || s.wr < 0 || s.durMs <= 0) return new double[] { s.fx, s.fy, s.fr };
-        double elapsed = s.paused ? 0 : (System.currentTimeMillis() - s.recvAt);
-        double remain = Math.max(0, s.remainMs - elapsed);
-        double f = (s.durMs - remain) / s.durMs;
-        if (f < 0) f = 0; else if (f > 1) f = 1;
-        return new double[] { s.fx + (s.wx - s.fx) * f, s.fy + (s.wy - s.fy) * f, s.fr + (s.wr - s.fr) * f };
+        if (!resolve()) return null;
+        try {
+            Object p = mGetInstance.invoke(null);
+            hasPlayer = p != null;
+            if (p != null) {
+                px = ((Number) mGetX.invoke(p)).doubleValue();
+                py = ((Number) mGetY.invoke(p)).doubleValue();
+            }
+            Object c = get(get(fEnv.get(null), "BlueZone"), "C");
+            if (c == null) { note("no round"); return null; }
+            double phase = num(c, "phase");
+            Object seg = get(c, "seg");
+            if (!(phase >= 1) || (phase == 1 && "wait".equals(seg))) { note("blue inactive (phase " + (long) phase + " " + seg + ")"); return null; }
+            double fx = num(c, "fx"), fy = num(c, "fy"), fr = num(c, "fr");
+            double wx = num(c, "wx"), wy = num(c, "wy"), wr = num(c, "wr");
+            if (!"shrink".equals(seg) || !(wr >= 0)) { note("blue still phase " + (long) phase + " " + seg); return new double[] { fx, fy, fr }; }
+            double dur = num(c, "dur"), remain = num(c, "remain"), recvAt = num(c, "recvAt");
+            boolean paused = Boolean.TRUE.equals(get(c, "paused"));
+            double elapsed = paused ? 0 : System.currentTimeMillis() - recvAt;
+            double left = Math.max(0, remain - elapsed);
+            double f = dur > 0 ? (dur - left) / dur : 1;
+            if (f < 0) f = 0; else if (f > 1) f = 1;
+            note("blue shrinking phase " + (long) phase + (paused ? " (paused)" : ""));
+            return new double[] { fx + (wx - fx) * f, fy + (wy - fy) * f, fr + (wr - fr) * f };
+        } catch (Throwable t) {
+            fail("read", t);
+            return null;
+        }
     }
 
-    static String r0(double v) { return Long.toString(Math.round(v)); }
+    private static void note(String s) {
+        if (!s.equals(lastState)) {
+            lastState = s;
+            BlueZoneWall.log("zone: " + s);
+        }
+    }
 }
