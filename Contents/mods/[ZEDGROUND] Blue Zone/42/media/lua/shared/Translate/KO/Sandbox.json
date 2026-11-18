@@ -1,7 +1,7 @@
 {
   "Sandbox_BlueZone": "Blue Zone (자기장)",
   "Sandbox_BlueZone_WaitScale": "대기 시간 배율",
-  "Sandbox_BlueZone_WaitScale_tooltip": "시작 지연과 각 페이즈 대기(흰 원 표시, 벽 정지) 시간에 곱한다. 파밍 시간 조절용. 1.0 = 판 약 76분, 1.6 이면 약 2시간(1판만 하는 날). 테스트는 0.1.",
+  "Sandbox_BlueZone_WaitScale_tooltip": "각 페이즈 대기(흰 원 표시, 벽 정지) 시간에 곱한다. 파밍 시간 조절용. 1.0 = 판 약 74분, 1.6 이면 약 2시간(1판만 하는 날). 테스트는 0.1.",
   "Sandbox_BlueZone_ShrinkScale": "축소 시간 배율",
   "Sandbox_BlueZone_ShrinkScale_tooltip": "각 페이즈 축소(벽 이동) 시간에 곱한다. 이동 속도 조절용. 낮추면 벽이 빨라진다. 테스트는 0.1.",
   "Sandbox_BlueZone_DamageScale": "데미지 배율",

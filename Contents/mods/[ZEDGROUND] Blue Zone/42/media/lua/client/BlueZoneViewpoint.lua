@@ -40,8 +40,8 @@ local function push()
     if not bridge then return end
     local C = B.C
     local ok, err
-    if not C then
-        ok, err = pcall(bridge.clear)
+    if not C or not B.blueActive(C) then
+        ok, err = pcall(bridge.clear)   -- 페이즈 1 대기에는 파란 원(벽)이 아직 없다
     else
         local remain = B.remainMs() or 0
         ok, err = pcall(bridge.set, C.fx, C.fy, C.fr, C.wx, C.wy, C.wr, C.dur, remain, C.seg == "shrink", C.paused == true)

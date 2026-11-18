@@ -61,7 +61,7 @@ end
 B.viewpointActive = viewpointActive
 
 -- ── 아이소 땅 위 원호 ─────────────────────────────────────
-local function drawWorldArc(playerNum, p, cx, cy, r)
+local function drawWorldArc(playerNum, p, cx, cy, r, c)
     if r < 1 then return end
     local px, py = p:getX(), p:getY()
     local dx, dy = px - cx, py - cy
@@ -73,7 +73,6 @@ local function drawWorldArc(playerNum, p, cx, cy, r)
     if span > math.pi then span = math.pi end
     local steps = math.ceil(2 * span * r / D.WORLD_SEG_LEN)
     if steps < 8 then steps = 8 elseif steps > 200 then steps = 200 end
-    local c = D.BLUE
     local renderer = getRenderer()
     local a0 = phi - span
     local da = 2 * span / steps
@@ -111,15 +110,16 @@ local function drawTint(p, cx, cy, r)
 end
 
 local function onPreUIDraw()
-    if not B.C then return end
+    local C = B.C
+    if not C then return end
     local p = getSpecificPlayer(0)
     if not p or p:isDead() then return end
     local cx, cy, r = B.currentBlue()
-    if not cx then return end
     if not viewpointActive() then
-        drawWorldArc(0, p, cx, cy, r)
+        if C.wr >= 0 then drawWorldArc(0, p, C.wx, C.wy, C.wr, D.WHITE) end
+        if cx then drawWorldArc(0, p, cx, cy, r, D.BLUE) end
     end
-    drawTint(p, cx, cy, r)
+    if cx then drawTint(p, cx, cy, r) end
 end
 Events.OnPreUIDraw.Add(onPreUIDraw)
 
@@ -144,10 +144,9 @@ end
 local function drawMapCircles(ui)
     local C = B.C
     if not C or not ui.mapAPI then return end
-    local cx, cy, r = B.currentBlue()
-    if not cx then return end
     if C.wr >= 0 then drawMapCircle(ui, ui.mapAPI, C.wx, C.wy, C.wr, D.WHITE) end
-    drawMapCircle(ui, ui.mapAPI, cx, cy, r, D.BLUE)
+    local cx, cy, r = B.currentBlue()
+    if cx then drawMapCircle(ui, ui.mapAPI, cx, cy, r, D.BLUE) end
 end
 
 local _origWorldMapRender = ISWorldMap.render
@@ -166,4 +165,4 @@ function ISMiniMapInner:render()
     self:clearStencilRect()
 end
 
-log("display: loaded (world line in iso only, map/minimap circles, outside tint)")
+log("display: loaded (white+blue world line in iso only, map/minimap circles, outside tint; blue hidden until phase 1 shrink)")

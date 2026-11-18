@@ -1,7 +1,7 @@
 {
   "Sandbox_BlueZone": "Blue Zone",
   "Sandbox_BlueZone_WaitScale": "Wait time scale",
-  "Sandbox_BlueZone_WaitScale_tooltip": "Multiplies the start delay and every phase wait (white circle shown, wall still). For looting time. 1.0 = about 76 min per round, 1.6 = about 2 hours. 0.1 for testing.",
+  "Sandbox_BlueZone_WaitScale_tooltip": "Multiplies every phase wait (white circle shown, wall still). For looting time. 1.0 = about 74 min per round, 1.6 = about 2 hours. 0.1 for testing.",
   "Sandbox_BlueZone_ShrinkScale": "Shrink time scale",
   "Sandbox_BlueZone_ShrinkScale_tooltip": "Multiplies every phase shrink (wall moving) time. For travel speed. Lower = faster wall. 0.1 for testing.",
   "Sandbox_BlueZone_DamageScale": "Damage scale",

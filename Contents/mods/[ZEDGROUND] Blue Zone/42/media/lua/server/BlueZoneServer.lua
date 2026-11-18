@@ -1,11 +1,12 @@
 -- Blue Zone 서버: 라운드 상태, 원 선정, 자기장 밖 데미지
 --
 -- 상태 S (nil = 대기)
---   id, phase (0 = 지연, 1..N), seg ("delay" | "wait" | "shrink" | "done")
+--   id, phase (1..N), seg ("wait" | "shrink" | "done")
 --   segStart, segDur (ms), pausedAt (ms, 일시정지 중일 때만)
 --   from = { x, y, r }  구간 시작 시점의 파란 원 (wait/delay/done 에서는 그대로 현재 파란 원)
---   white = { x, y, r } 이번 페이즈 목표. 지연·done 에서는 nil (지연 중 페이즈 1 원은 firstWhite 에 숨겨 둔다)
--- 시작 파란 원 = 페이즈 1 흰 원과 같은 중심, 반지름 x START_RADIUS_MUL. 그 밖에 착지한 사람은 페이즈 1 부터 데미지
+--   white = { x, y, r } 이번 페이즈 목표. done 에서는 nil
+-- 시작 파란 원 = 페이즈 1 흰 원과 같은 중심, 반지름 x START_RADIUS_MUL. 페이즈 1 대기 동안은 비활성(BlueZone.blueActive)이라
+--   데미지가 없고, 페이즈 1 축소가 시작되면 그 원에서 줄어들기 시작한다. 그때 밖에 있는 사람은 그때부터 데미지
 -- 시간은 서버 getTimestampMs 기준. 클라에는 "구간 남은 ms" 로 보내고 클라가 자기 시계로 센다.
 -- 데미지: 서버가 BodyDamage:ReduceGeneralHealth 후 sendDamage(player) 로 BodyDamage 전체를 클라에 보낸다
 --   (바닐라 ISSmashWindow:complete 와 같은 방식, PlayerDamagePacket).
@@ -146,12 +147,7 @@ end
 
 -- 구간 하나 진행 (시간이 다 됐거나 NextPhase)
 local function advance(now, why)
-    if S.seg == "delay" then
-        S.phase = 1
-        S.white = S.firstWhite
-        S.firstWhite = nil
-        setSeg(now, "wait", B.PHASES[1].wait)
-    elseif S.seg == "wait" then
+    if S.seg == "wait" then
         setSeg(now, "shrink", B.PHASES[S.phase].shrink)
     elseif S.seg == "shrink" then
         S.from = S.white   -- 파란 원이 흰 원에 닿음
@@ -174,9 +170,9 @@ local function startRound(by, hintX, hintY)
     _seq = _seq + 1
     local now = nowMs()
     local first = pickFirst(hintX, hintY)
-    S = { id = _seq, phase = 0, from = initialBlue(first), white = nil, firstWhite = first,
+    S = { id = _seq, phase = 1, from = initialBlue(first), white = first,
         nextDamage = now + DAMAGE_INTERVAL_MS, nextSync = now + SYNC_INTERVAL_MS, hurt = {}, lastPos = {} }
-    setSeg(now, "delay", B.DELAY_SEC)
+    setSeg(now, "wait", B.PHASES[1].wait)
     local x1, y1, x2, y2 = area()
     log(string.format("round %d started by %s: area=(%d,%d)-(%d,%d) waitScale=%.2f shrinkScale=%.2f damageScale=%.2f first=(%.0f,%.0f r%.0f) start blue r%.0f",
         S.id, tostring(by), x1, y1, x2, y2, B.opt("WaitScale"), B.opt("ShrinkScale"), B.opt("DamageScale"),
@@ -194,6 +190,7 @@ end
 -- ── 데미지 ───────────────────────────────────────────────
 
 local function damageTick(now)
+    if not B.blueActive(S) then return end
     local dps = B.dpsOf(S.phase) * B.opt("DamageScale")
     if dps <= 0 then return end
     local cx, cy, r = currentBlue(now)
@@ -240,6 +237,11 @@ end
 local function statusLog(now)
     speedLog(now)
     local cx, cy, r = currentBlue(now)
+    if not B.blueActive(S) then
+        log(string.format("status round=%d phase=%d seg=%s remain=%dms paused=%s blue=inactive(start r%.0f) white=(%.0f,%.0f r%.0f)",
+            S.id, S.phase, S.seg, remainMs(now), tostring(S.pausedAt ~= nil), r, S.white.x, S.white.y, S.white.r))
+        return
+    end
     local outside = {}
     for _, p in ipairs(players()) do
         if not p:isDead() then
@@ -311,10 +313,8 @@ local function onClientCommand(module, command, player, args)
         broadcast(now, "resume")
     elseif command == "NextPhase" then
         if not S or S.seg == "done" then return end
+        -- 대기 -> 축소 시작, 축소 -> 흰 원에 붙이고 다음 대기 (구간 하나씩. 11-19: 예전엔 축소를 통째로 건너뛰어 점진 축소를 볼 수 없었다)
         log("next phase by " .. who .. " (from phase=" .. S.phase .. " seg=" .. S.seg .. ")")
-        if S.seg == "wait" then
-            S.seg = "shrink"   -- 대기를 건너뛰고 축소를 즉시 끝낸다
-        end
         advance(now, "next phase")
     elseif command == "Stop" then
         stopRound("admin " .. who)
