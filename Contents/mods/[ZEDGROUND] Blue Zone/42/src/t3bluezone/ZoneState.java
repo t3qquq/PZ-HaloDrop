@@ -6,7 +6,7 @@ package t3bluezone;
  * the same way BlueZoneClient.lua does it (remain counts down from the moment the snapshot arrived).
  */
 public final class ZoneState {
-    public static final String VERSION = "0.1.0";
+    public static final String VERSION = "0.2.0";
 
     private ZoneState() {}
 

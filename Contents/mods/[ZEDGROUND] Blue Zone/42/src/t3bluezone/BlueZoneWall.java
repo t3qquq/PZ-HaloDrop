@@ -20,8 +20,10 @@ import viewpoint.api.view.Vec3;
  * not match the 3D camera, so the wall is drawn here in Viewpoint's own pass (DrawPoint.AFTER_TRANSLUCENT) with the
  * frame's view and projection matrices.
  *
- * Geometry: only the arc of the current blue circle near the player (ARC_HALF tiles each side, SEG tiles per quad),
- * a vertical band from camera height - BELOW to + ABOVE. Rebuilt and uploaded every frame (at most MAX_QUADS quads).
+ * Geometry: only the arc of the current blue circle near the player (ARC_HALF tiles each side, at most MAX_QUADS quads),
+ * a vertical band from camera height - BELOW to + ABOVE. Rebuilt and uploaded every frame.
+ * Look (0.2.0, 11-19): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks,
+ * strong enough to read as a wall from far away (0.1.0 was a faint striped film).
  *
  * Axes: how PZ world tiles (x, y) map to Viewpoint's render space is not documented. It is found at run time:
  * the camera position is read back from the view matrix, then each candidate mapping (x/y swapped or not, depth axis
@@ -32,15 +34,15 @@ import viewpoint.api.view.Vec3;
 public final class BlueZoneWall implements Addon {
     static final String TAG = "[BlueZone][VP] ";
 
-    static final float ARC_HALF = 180f;      // tiles of arc each side of the player
-    static final float SEG = 3f;             // tiles per quad
-    static final int MAX_QUADS = 128;
-    static final float SHOW_RANGE = 160f;    // draw only when the player is this close to the edge
+    static final float ARC_HALF = 400f;      // tiles of arc each side of the player
+    static final float SEG = 3f;             // tiles per quad (wider when MAX_QUADS caps it)
+    static final int MAX_QUADS = 256;
+    static final float SHOW_RANGE = 450f;    // draw only when the player is this close to the edge
     static final float BELOW = 60f;          // wall bottom: camera height - BELOW (render units)
     static final float ABOVE = 140f;         // wall top: camera height + ABOVE
     static final float MATCH_TILES = 14f;    // camera-to-player distance allowed while matching axes (3rd person boom)
     static final float RECHECK_TILES = 40f;  // re-match axes when the player drifts this far from the camera
-    static final float[] COLOR = { 0.20f, 0.45f, 1.00f, 0.38f };
+    static final float[] COLOR = { 0.12f, 0.38f, 1.00f, 0.42f };   // rgb = haze tint, a = base opacity
 
     static final int FLOATS_PER_VERT = 5;    // x y z u v
     static final int VERTS_PER_QUAD = 6;
@@ -55,15 +57,32 @@ public final class BlueZoneWall implements Addon {
             "    vUV = aUV;\n" +
             "    gl_Position = uProj * uView * vec4(aPos, 1.0);\n" +
             "}\n";
+    // vUV.x = tiles along the arc, vUV.y = 0 (bottom) .. 1 (top)
     static final String FS =
             "in vec2 vUV;\n" +
             "uniform vec4 uColor;\n" +
             "uniform float uTime;\n" +
             "out vec4 fragColor;\n" +
+            "float hash(float n) { return fract(sin(n) * 43758.5453); }\n" +
+            "float noise(vec2 p) {\n" +
+            "    vec2 i = floor(p); vec2 f = fract(p); f = f * f * (3.0 - 2.0 * f);\n" +
+            "    float n = i.x + i.y * 57.0;\n" +
+            "    return mix(mix(hash(n), hash(n + 1.0), f.x), mix(hash(n + 57.0), hash(n + 58.0), f.x), f.y);\n" +
+            "}\n" +
             "void main() {\n" +
-            "    float stripe = step(0.5, fract(vUV.x * 0.25 - uTime * 0.35));\n" +
-            "    float fade = smoothstep(0.0, 0.12, vUV.y) * (1.0 - smoothstep(0.80, 1.0, vUV.y));\n" +
-            "    fragColor = vec4(uColor.rgb, uColor.a * (0.75 + 0.25 * stripe) * fade);\n" +
+            "    float u = vUV.x; float v = vUV.y;\n" +
+            "    float fade = smoothstep(0.0, 0.04, v) * (1.0 - smoothstep(0.80, 1.0, v));\n" +
+            "    float haze = noise(vec2(u * 0.12, v * 5.0 - uTime * 0.5)) * 0.6\n" +
+            "               + noise(vec2(u * 0.45, v * 18.0 - uTime * 1.4)) * 0.4;\n" +
+            "    float col = floor(u * 0.5);\n" +
+            "    float wob = noise(vec2(col * 3.7, v * 26.0 + uTime * 9.0)) - 0.5;\n" +
+            "    float x = fract(u * 0.5) + wob * 0.35;\n" +
+            "    float lit = step(0.80, hash(col * 1.37 + floor(uTime * 7.0) * 11.0));\n" +
+            "    float len = step(hash(col * 2.11 + floor(uTime * 7.0) * 5.0) * 0.7, v);\n" +
+            "    float bolt = smoothstep(0.07, 0.0, abs(x - 0.5)) * lit * len;\n" +
+            "    vec3 c = uColor.rgb * (0.55 + 0.9 * haze) + vec3(0.75, 0.92, 1.0) * bolt * 1.6;\n" +
+            "    float a = (uColor.a + 0.30 * haze + 0.55 * bolt) * fade;\n" +
+            "    fragColor = vec4(c, clamp(a, 0.0, 0.92));\n" +
             "}\n";
 
     private Registration reg;
