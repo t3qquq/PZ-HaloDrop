@@ -115,8 +115,10 @@ local function wornChutes(p)
     return out
 end
 
--- 지급: 인벤토리 추가 -> 클라에 아이템 전송 -> 클라에 착용 지시(ChuteWear)
-local function chuteGive(p)
+-- 지급: 인벤토리 추가 -> 클라에 아이템 전송 -> (wear 면) 클라에 착용 지시(ChuteWear)
+-- 점프 때 미리 넣어 두면(wear=false) 전개 순간 서버 왕복 없이 클라가 바로 착용한다.
+-- 11-18 런2: 서버가 약 9초 멈춘 사이 ChuteOpen 이 늦게 도착해 낙하산 없이 6.7초 내려왔다.
+local function chuteGive(p, wear)
     local item = findChute(p)
     if not item then
         item = instanceItem(HaloDrop.CHUTE_ITEM)
@@ -127,11 +129,11 @@ local function chuteGive(p)
         local inv = p:getInventory()
         inv:AddItem(item)
         sendAddItemToContainer(inv, item)
-        log("chute given to " .. tostring(p:getUsername()) .. " id=" .. tostring(item:getID()))
-    else
+        log("chute given to " .. tostring(p:getUsername()) .. " id=" .. tostring(item:getID()) .. " wear=" .. tostring(wear))
+    elseif wear then
         log("chute already in inventory of " .. tostring(p:getUsername()) .. " -> wear only")
     end
-    toPlayer(p, "ChuteWear", { id = R and R.id or 0 })
+    if wear then toPlayer(p, "ChuteWear", { id = R and R.id or 0 }) end
 end
 
 -- 회수: 착용 목록·인벤토리 양쪽에서 전부 지운다. 지운 게 있으면 true.
@@ -699,13 +701,15 @@ local function onClientCommand(module, command, player, args)
         jumpPlaneRemove(key, "re-jump")
         R.jumps[key] = { x = jx, y = jy, p = player, pending = true, askedAt = nowMs(),
             deadline = nowMs() + HaloDrop.opt("JumpWaitMax") * 1000, tried = {}, reason = "waiting for chunk" }
+        -- 낙하산을 미리 인벤토리에 넣는다 (착용은 전개 때 클라가)
+        chuteGive(player, false)
     elseif command == "PlaneDone" then
         if not R or args.id ~= R.id then return end
         jumpPlaneRemove(key, "client done")
     elseif command == "ChuteOpen" then
         if not R or args.id ~= R.id then return end
         log("chute open " .. tostring(player:getUsername()) .. " (" .. tostring(args.reason) .. ") alt=" .. tostring(args.alt))
-        chuteGive(player)
+        chuteGive(player, true)
     elseif command == "Landed" then
         log(string.format("landed %s at (%.0f,%.0f,%.1f) chute=%s",
             tostring(player:getUsername()), player:getX(), player:getY(), player:getZ(), tostring(args.chute)))

@@ -741,6 +741,9 @@ local function openChute(p, reason)
         J.chuteSent = true
         send(p, "ChuteOpen", { id = HaloDrop.C.id, reason = reason, alt = math.floor(J.alt) })
     end
+    -- 점프 때 서버가 넣어 둔 낙하산이 있으면 서버 응답을 기다리지 않고 바로 착용
+    local worn = chuteWear(p)
+    log("chute local wear at open: " .. (worn and "ok" or "no item yet -> waiting for server ChuteWear"))
     local gAlt, floorZ = groundAlt(p)
     log(string.format("chute open (%s) alt=%.0fm above-ground=%.0fm floorZ=%.1f vz=%.1f vh=%.1f vs=%.1f", reason, J.alt, J.alt - gAlt, floorZ, J.vz, J.vh, J.vs or 0))
 end

@@ -57,6 +57,10 @@ public final class SkyLight {
     private static final long PLANE_SCAN_MS = 200L;
     private static final int PLANE_REACH = 32;      // tiles around the vehicle origin (C-17 is about 53 tiles long)
     private static final int PLANE_Z_REACH = 2;
+    // the vehicle's own z stays 0 while the client moves it with setWorldTransform (run 11-18 fix1:
+    // "tracked ... at (5889,10123,0)", plane swaps 0, C-17 still black up close) -> use the flight level
+    private static final int PLANE_LEVEL = 31;
+    private static final int PLANE_MIN_Z = 20;
     private static final int PLANE_SLOTS = 4;
     private static final int[] px = new int[PLANE_SLOTS], py = new int[PLANE_SLOTS], pz = new int[PLANE_SLOTS];
     private static volatile int planeCount;
@@ -244,7 +248,8 @@ public final class SkyLight {
     static boolean planeAt(int x, int y, int z) {
         int n = planeCount;
         for (int i = 0; i < n; i++) {
-            if (Math.abs(px[i] - x) <= PLANE_REACH && Math.abs(py[i] - y) <= PLANE_REACH && Math.abs(pz[i] - z) <= PLANE_Z_REACH) return true;
+            int zc = pz[i] >= PLANE_MIN_Z ? pz[i] : PLANE_LEVEL;
+            if (Math.abs(px[i] - x) <= PLANE_REACH && Math.abs(py[i] - y) <= PLANE_REACH && Math.abs(zc - z) <= PLANE_Z_REACH) return true;
         }
         return false;
     }
