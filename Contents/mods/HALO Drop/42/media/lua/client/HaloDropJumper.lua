@@ -82,7 +82,7 @@ local function carryAltM()
 end
 
 -- 가상 고도 -> 붙잡아 둘 실제 z (HaloDrop.DESCENT_Z). 구간별 선형:
---   기본(PROPORTIONAL): JumpAltitude 에서 CarryZ, lowAltM 에서 LOW_Z 를 한 직선으로.
+--   기본(PROPORTIONAL): JumpAltitude 에서 CarryZ, lowAltM 에서 LOW_Z 를 잇는다. CURVE_B 가 있으면 로그 곡선, 없으면 직선.
 --   PROPORTIONAL false: JumpAltitude 에서 CarryZ, AutoOpenAltitude 에서 LOW_Z + (CarryZ-LOW_Z)*CHUTE_FRAC, lowAltM 에서 LOW_Z.
 --   런 6: z 가 끝까지 CarryZ(3) 라 "둥둥 떠 있는" 느낌 -> 마지막 7m(엔진 낙하)에서만 내려가는 게 보였다.
 --   엔진은 current 칸을 z 아래로 내려가며 찾으므로(IsoMovingObject.findCurrentGridSquare) 공중 칸은
@@ -98,8 +98,14 @@ local function visualZ(alt)
     if alt >= top then return carry end
     if alt <= lowAlt then return low end
     if D.PROPORTIONAL then
+        local u = (alt - lowAlt) / (top - lowAlt)
+        local B = D.CURVE_B
+        if B and B > 0 then
+            -- 로그 곡선: 지면에 가까울수록 1층당 가상 미터가 줄어든다 (11-18, 착지 직전 급가속 완화)
+            return low + (carry - low) * math.log(1 + u / B) / math.log(1 + 1 / B)
+        end
         -- 한 직선: 층당 미터가 자유낙하·캐노피 구간에서 같다 -> 화면 하강 속도 비율 = 실제 속도 비율
-        return low + (carry - low) * (alt - lowAlt) / (top - lowAlt)
+        return low + (carry - low) * u
     end
     if mid <= lowAlt or mid >= top then mid = (top + lowAlt) / 2 end
     local zMid = low + (carry - low) * D.CHUTE_FRAC
@@ -118,7 +124,11 @@ local function altOfZ(z)
     local carry = carryZ()
     if carry <= low then return z * M end
     local lowAlt = low * M
-    return lowAlt + (z - low) * (HaloDrop.opt("JumpAltitude") - lowAlt) / (carry - low)
+    local g = (z - low) / (carry - low)
+    local B = D.CURVE_B
+    local u = g
+    if B and B > 0 then u = B * (math.exp(g * math.log(1 + 1 / B)) - 1) end
+    return lowAlt + u * (HaloDrop.opt("JumpAltitude") - lowAlt)
 end
 
 -- 발밑 바닥(지면·옥상)의 가상 고도와 그 층. 자동 개방을 배그처럼 "아래 지면 기준"으로 판정하는 데 쓴다.
@@ -1013,9 +1023,9 @@ local function onPlayerUpdate(p)
             HaloDropPose.set(p, nil)   -- 엔진 낙하 구간은 바닐라 낙하·착지 애니메이션에 맡긴다
             -- 붙잡기 구간은 가상 고도 약 53m 가 1층이라 화면에선 0.2층/초 남짓으로 내려오다가, 엔진 낙하(1층 = 2.45m)로
             -- 넘어가는 순간 같은 속도가 20배 넘게 빨라 보였다(11-18 d27c7e2: z 3.05 -> 0.26 을 1초에).
-            -- 캐노피면 놓는 순간의 화면 속도에서 LAND_SPEED 까지 RELEASE_RAMP_MS 에 걸쳐 올린다.
+            -- 캐노피면 놓는 순간의 화면 속도에서 LAND_SPEED 까지 RELEASE_RAMP_MS 에 걸쳐 옮긴다 (곡선 매핑이면 거의 같은 값).
             J.relAt = now
-            J.relRate = visualZ(carryAltM() + J.vz) - lowZ()
+            J.relRate = (visualZ(carryAltM() + 1) - lowZ()) * J.vz   -- 놓는 지점의 층/m 기울기 x 속도
             log(string.format("release to engine fall at z=%.1f state=%s vz=%.1f held=%.2f floors/s", p:getZ(), J.state, J.vz, J.relRate))
         end
         -- 놓기: 엔진이 z 를 내린다. 수평 위치와 낙하 속도만 정한다.
@@ -1030,7 +1040,7 @@ local function onPlayerUpdate(p)
         local v = J.vz / HaloDrop.M_PER_FLOOR
         if canopy then
             local k = math.min(1, (now - (J.relAt or now)) / HaloDrop.RELEASE_RAMP_MS)
-            local held = math.min(J.relRate or 0, HaloDrop.LAND_SPEED)
+            local held = J.relRate or HaloDrop.LAND_SPEED
             v = held + (HaloDrop.LAND_SPEED - held) * k
         end
         if h < HaloDrop.BRAKE_H and canopy then v = HaloDrop.LAND_SPEED end
