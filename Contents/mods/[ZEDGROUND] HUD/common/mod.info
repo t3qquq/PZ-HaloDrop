@@ -1,0 +1,5 @@
+name=[ZEDGROUND] HUD
+id=t3ZedHUD
+description=배그식 상단 나침반·생존자 수·자기장 타이머 HUD
+versionMin=42.21
+modversion=0.1.0
