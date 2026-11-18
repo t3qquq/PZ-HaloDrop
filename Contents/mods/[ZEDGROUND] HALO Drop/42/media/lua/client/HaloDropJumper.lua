@@ -421,7 +421,7 @@ local DIAG_MS, DIAG_Y, DIAG_MAX = 50, 1.05, 1500
 local function trackText(p)
     local parts = {}
     for layer = 0, 3 do
-        for i = 0, 7 do
+        for i = 0, 15 do   -- 자유낙하 2D 블렌드만 클립 10개다 (0~7 만 보면 GlideR·Dive 가 빠진다, 11-19 런 로그)
             local okN, name = pcall(function() return p:dbgGetAnimTrackName(layer, i) end)
             if not okN or name == nil or name == "" then break end
             local okW, w = pcall(function() return p:dbgGetAnimTrackWeight(layer, i) end)
@@ -452,8 +452,8 @@ local function poseDiag(p, now, diving)
             tostring(p:allowsTwist()), tostring(p:isTwisting()), tostring(p:isHeadLookAround()),
             p:getHeadLookHorizontal(), p:getHeadLookVertical())
     end)
-    log(string.format("posediag t=%d dive=%s blend=(%.2f,%.2f)->(%.2f,%.2f) hdg=%.0f camT=%s eyeYaw=%s eyePitch=%s %s | %s",
-        now, tostring(diving), bx, by, btx, bty, J.heading or 0,
+    log(string.format("posediag t=%d dive=%s blend=(%.2f,%.2f)->(%.2f,%.2f) hdg=%.0f face=%.0f camT=%s eyeYaw=%s eyePitch=%s %s | %s",
+        now, tostring(diving), bx, by, btx, bty, J.heading or 0, J.faceHdg or J.heading or 0,
         J.camTarget and string.format("%.0f", J.camTarget) or "nil",
         _cam.ok and string.format("%.1f", _cam.yaw or 0) or "nil",
         _cam.ok and string.format("%.1f", _cam.pitch or 0) or "nil",
@@ -753,6 +753,8 @@ local function jump(p, why)
     HaloDropPose.set(p, "freefall")
     J.alt = HaloDrop.opt("JumpAltitude")
     J.heading = HaloDropFlight.headingDeg(HaloDrop.C.fl)
+    J.faceHdg = J.heading
+    J.faceLimited = nil
     J.pitch = 0
     -- 뛰어내린 순간 수송기 속도를 이어받는다 (수평), 수직은 0 에서 가속.
     -- 상한 JUMP_VH_MAX: 런 5 에서 80 을 그대로 받아 로드 창을 벗어나 3초 스냅백 + 10초 current==null 이 났다
@@ -1059,7 +1061,32 @@ local function onPlayerUpdate(p)
             end
         end
     end
-    face(p, hx, hy)
+    -- 보이는 몸 방향(J.faceHdg)은 이동 방향(J.heading)과 따로 둔다 (11-19 런 영상 HALO motion cer 4:09~4:12).
+    -- 다이브 자세는 몸이 수직이라 heading 을 돌리면 몸이 긴 축으로 제자리 회전한다. 카메라를 휘두르는 만큼
+    -- (로그 160도/초, heading 은 한 틱 차이로 그대로 따라감) 몸통·팔이 카메라 앞에서 휙휙 돌아 뒤틀리는 것처럼 보였다.
+    -- 블렌드 Y 가 다이브 쪽(FACE_DIVE_START ~ FACE_DIVE_FULL)일수록 몸이 도는 속도를 FACE_RATE_DIVE 까지 줄인다.
+    -- 이동은 그대로 heading 을 쓴다(다이브는 수평 속도가 작고 몸이 수직이라 어긋나도 안 보인다).
+    -- 다이브가 풀리면 FACE_RATE_FLAT 으로 heading 을 따라잡는다. 낙하산은 예전대로 heading 과 같다.
+    local fhx, fhy = hx, hy
+    if canopy or not J.faceHdg then
+        J.faceHdg = J.heading
+    else
+        local P = HaloDrop.POSE
+        local _, by = HaloDropPose.blend()
+        local k = by and clamp01((by - P.FACE_DIVE_START) / (P.FACE_DIVE_FULL - P.FACE_DIVE_START)) or 0
+        local d = wrapDeg(J.heading - J.faceHdg)
+        local step = (P.FACE_RATE_FLAT + (P.FACE_RATE_DIVE - P.FACE_RATE_FLAT) * k) * dt
+        if d > step then d = step elseif d < -step then d = -step end
+        J.faceHdg = wrapDeg(J.faceHdg + d)
+        local limited = k > 0
+        if limited ~= (J.faceLimited or false) then
+            J.faceLimited = limited
+            log(string.format("face: dive facing limiter %s (blendY=%.2f heading=%.0f face=%.0f)", limited and "ON" or "OFF", by or 0, J.heading, J.faceHdg))
+        end
+        local fr = math.rad(J.faceHdg)
+        fhx, fhy = math.cos(fr), math.sin(fr)
+    end
+    face(p, fhx, fhy)
     descentZoomTick()
 
     if not J.released and J.alt - J.vz * dt > carryAltM() then

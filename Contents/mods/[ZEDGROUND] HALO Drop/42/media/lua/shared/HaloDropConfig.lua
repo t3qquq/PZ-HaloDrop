@@ -146,6 +146,12 @@ HaloDrop.POSE = {
     CANOPY_SLOW_Y = -0.4,  -- 낙하산 Ctrl(느린 하강)의 Y 목표. -1 이 S 플레어 자세
     NET_STEP      = 0.1,   -- 다른 클라에 보내는 목표값 단위 (W 중 카메라 피치처럼 연속인 값을 끊는다)
     NET_MIN_MS    = 100,   -- 목표값 전송 최소 간격(ms)
+    -- 보이는 몸 방향이 이동 방향(heading)을 따라가는 속도(도/초). 다이브(몸 수직)에서는 카메라를 돌릴 때 몸이
+    -- 긴 축으로 휙휙 도는 걸 막으려고 느리게 한다 (HaloDropJumper 강하 모델의 face 주석)
+    FACE_RATE_FLAT  = 720,  -- 블렌드 Y 가 FACE_DIVE_START 이하(엎드림·활공): 사실상 즉시
+    FACE_RATE_DIVE  = 50,   -- 블렌드 Y 가 FACE_DIVE_FULL 이상(다이브)
+    FACE_DIVE_START = 1.2,
+    FACE_DIVE_FULL  = 1.7,
 }
 
 -- ── 공중 칸 채우기 (HaloDropJumper airFill). 런 4 쿼터뷰 검정 화면 실험. CHUNKS 0 이면 끔 ──────
