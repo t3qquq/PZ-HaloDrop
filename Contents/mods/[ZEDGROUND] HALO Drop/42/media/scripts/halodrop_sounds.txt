@@ -35,7 +35,7 @@ module HaloDrop
         clip
         {
             file = media/sound/halodrop_main_theme.ogg,
-            volume = 0.6,
+            volume = 0.35,
         }
     }
 }
