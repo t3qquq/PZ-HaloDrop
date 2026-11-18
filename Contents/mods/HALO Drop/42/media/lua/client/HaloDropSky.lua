@@ -10,7 +10,12 @@
 --            타일이 없으면(HaloDropTiles.lua 부재) 아래 SkyMap 으로 대체.
 --   SkyMap   UIWorldMap(바닐라 월드맵 벡터 렌더러 = M 키 지도). 11-17: SKY.TOP_DOWN 이면 북쪽이 위인 탑뷰(□),
 --            경로 A->B 를 화살표로 그리고 마우스 휠로 확대·축소. 열린 동안 바닐라 미니맵은 숨겼다가 닫을 때 탑승 직전 상태로 되돌린다.
---   SkyScene ISUI3DScene 에 수송기 차량 스크립트 모델. 화면 가운데 고정, 기수만 돌림.
+--            11-18: 왼쪽 드래그로 지도를 옮긴다(S.panX/Y = 수송기 기준 중심 오프셋, 타일). 지도는 계속 수송기를 따라가고
+--            옮긴 만큼의 차이는 유지된다. 오른쪽 클릭이면 오프셋을 지운다.
+--   SkyScene ISUI3DScene 에 수송기 차량 스크립트 모델. 벡터 지도면 매 프레임 지도 위 수송기 위치에 놓고(11-18 전엔 화면 가운데 고정)
+--            지도 확대·축소에 맞춰 크기도 바꾼다: 씬 한 변 = 기본 크기 x 2^(지도 zoom - SkyZoom). UI3DScene 은 보이는 폭이
+--            요소 크기와 무관한 유닛 수라(b42.21 UI3DScene.calcMatrices :2621) 요소를 키우면 기체가 같은 비율로 커진다.
+--            UIWorldMap 도 zoom 1 당 2배다(WorldMapRenderer.zoomMult = 2^zoomF).
 --            UI3DScene 은 zoom 1 이어도 보이는 폭이 12.7 유닛(b42.21 :383 zoomMult, :2621 ortho 1366/zoomMult)이라
 --            53 m 짜리 C-17 은 getObjectScale("plane"):set(SCENE_SCALE) 로 객체 자체를 줄인다 (바닐라 SpriteModelEditor.lua:596 과 같은 방법).
 --   HUD 는 HaloDropHUD 가 OnPostUIDraw 로 그린다 (OnPreUIDraw 는 UI 요소보다 먼저라 이 요소에 가려진다).
@@ -173,10 +178,71 @@ function SkyMap:instantiate()
     log(string.format("sky: map ready data=%d zoom=%.1f iso=%s", nData, HaloDrop.opt("SkyZoom"), tostring(not K.TOP_DOWN)))
 end
 
+-- 지도 중심 = 수송기 앞쪽(S.cx, S.cy) + 드래그 오프셋
+local function mapCenter()
+    return S.cx + (S.panX or 0), S.cy + (S.panY or 0)
+end
+
 function SkyMap:prerender()
     if S.cx and S.cy then
-        self.mapAPI:centerOn(S.cx, S.cy)
+        self.mapAPI:centerOn(mapCenter())
     end
+end
+
+-- 왼쪽 드래그: 바닐라 MapSpawnSelect.lua 와 같은 방식(시작 시점의 zoom·중심으로 마우스 아래 월드 좌표 차이를 구한다)
+-- 좌표는 getMouseX/Y 로 읽는다 (기체 씬이 위에 있을 때도 같은 함수를 부를 수 있게)
+function SkyMap:onMouseDown(x, y)
+    if not S.cx then return true end
+    local mx, my = self:getMouseX(), self:getMouseY()
+    local cx, cy = mapCenter()
+    local zoom = self.mapAPI:getZoomF()
+    self.drag = {
+        mx = mx, my = my, moved = false, cx = cx, cy = cy, zoom = zoom,
+        wx = self.mapAPI:uiToWorldX(mx, my, zoom, cx, cy), wy = self.mapAPI:uiToWorldY(mx, my, zoom, cx, cy),
+        panX = S.panX or 0, panY = S.panY or 0,
+    }
+    return true
+end
+
+function SkyMap:onMouseMove(dx, dy)
+    local d = self.drag
+    if not d then return true end
+    local mx, my = self:getMouseX(), self:getMouseY()
+    if not d.moved and math.abs(mx - d.mx) <= 4 and math.abs(my - d.my) <= 4 then return true end
+    d.moved = true
+    local wx = self.mapAPI:uiToWorldX(mx, my, d.zoom, d.cx, d.cy)
+    local wy = self.mapAPI:uiToWorldY(mx, my, d.zoom, d.cx, d.cy)
+    S.panX = d.panX + (d.wx - wx)
+    S.panY = d.panY + (d.wy - wy)
+    if S.cx then self.mapAPI:centerOn(mapCenter()) end
+    return true
+end
+
+function SkyMap:onMouseMoveOutside(dx, dy)
+    return self:onMouseMove(dx, dy)
+end
+
+function SkyMap:onMouseUp(x, y)
+    local d = self.drag
+    self.drag = nil
+    if d and d.moved then
+        log(string.format("sky: map dragged, offset from plane=(%.0f,%.0f) tiles", S.panX or 0, S.panY or 0))
+    end
+    return true
+end
+
+function SkyMap:onMouseUpOutside(x, y)
+    return self:onMouseUp(x, y)
+end
+
+-- 오른쪽 클릭: 다시 수송기 기준으로
+function SkyMap:onRightMouseUp(x, y)
+    if (S.panX or 0) ~= 0 or (S.panY or 0) ~= 0 then
+        S.panX, S.panY = 0, 0
+        if S.cx then self.mapAPI:centerOn(mapCenter()) end
+        log("sky: map offset reset (right click)")
+    end
+    return true
 end
 
 -- 점 (ax,ay) 에서 단위벡터 (ux,uy) 방향 길이 len 인 선분이 사각형 안에 있는 거리 구간 [d0, d1]. 안 걸치면 nil
@@ -244,12 +310,30 @@ function SkyMap:onMouseWheelZoom(del)
     local z = self.mapAPI:getZoomF() - del * K.ZOOM_STEP
     if z < K.ZOOM_MIN then z = K.ZOOM_MIN elseif z > K.ZOOM_MAX then z = K.ZOOM_MAX end
     self.mapAPI:setZoom(z)
-    if S.cx and S.cy then self.mapAPI:centerOn(S.cx, S.cy) end
+    if S.cx and S.cy then self.mapAPI:centerOn(mapCenter()) end
     return true
 end
 
 -- ── 기체 씬 ───────────────────────────────────────────────────────────────────
 local SkyScene = ISUIElement:derive("HaloDropSkyScene")
+
+local function toMap(name, ...)
+    local m = S.map
+    if m and m[name] then return m[name](m, ...) end
+    return true
+end
+
+-- 기체 씬(겉 요소·안쪽 ISUI3DScene)이 받은 마우스를 지도로 넘긴다
+local function forwardMouse(el)
+    el.onMouseDown = function(_, x, y) return toMap("onMouseDown", x, y) end
+    el.onMouseUp = function(_, x, y) return toMap("onMouseUp", x, y) end
+    el.onMouseUpOutside = function(_, x, y) return toMap("onMouseUpOutside", x, y) end
+    el.onMouseMove = function(_, dx, dy) return toMap("onMouseMove", dx, dy) end
+    el.onMouseMoveOutside = function(_, dx, dy) return toMap("onMouseMoveOutside", dx, dy) end
+    el.onRightMouseDown = function() return true end
+    el.onRightMouseUp = function(_, x, y) return toMap("onRightMouseUp", x, y) end
+    el.onMouseWheel = function(_, del) return toMap("onMouseWheel", del) end
+end
 
 function SkyScene:new()
     local sw, sh = screenSize()
@@ -257,7 +341,39 @@ function SkyScene:new()
     local o = ISUIElement:new(math.floor((sw - w) / 2), math.floor((sh - w) / 2 + sh * K.SCENE_DY), w, w)
     setmetatable(o, self)
     self.__index = self
+    o.baseW = w
+    o.sizeW = w
     return o
+end
+
+-- 벡터 지도일 때: 지도 위 수송기 위치에 놓고, 지도 zoom 에 맞춰 크기를 바꾼다
+function SkyScene:follow()
+    local m = S.map
+    local api = m and m.mapAPI
+    if not api or not S.px then return end
+    local sw, sh = screenSize()
+    local f = 2 ^ (api:getZoomF() - HaloDrop.opt("SkyZoom"))
+    local w = self.baseW * f
+    local wMin, wMax = self.baseW * K.PLANE_MIN, math.max(sw, sh) * K.PLANE_MAX
+    if w < wMin then w = wMin elseif w > wMax then w = wMax end
+    w = math.floor(w + 0.5)
+    if w ~= self.sizeW then
+        self.sizeW = w
+        self:setWidth(w)
+        self:setHeight(w)
+        if self.scene then
+            self.scene:setWidth(w)
+            self.scene:setHeight(w)
+        end
+        local now = getTimestampMs()
+        if not self.sizeLogAt or now >= self.sizeLogAt then
+            self.sizeLogAt = now + 1000
+            log(string.format("sky: plane size %dpx (map zoom %.2f, x%.2f of SkyZoom %.1f)", w, api:getZoomF(), w / self.baseW, HaloDrop.opt("SkyZoom")))
+        end
+    end
+    local ux, uy = api:worldToUIX(S.px, S.py), api:worldToUIY(S.px, S.py)
+    self:setX(math.floor(ux - w / 2))
+    self:setY(math.floor(uy - w / 2))
 end
 
 function SkyScene:createChildren()
@@ -265,16 +381,8 @@ function SkyScene:createChildren()
     sc.background = false
     sc:initialise()
     sc:instantiate()
-    sc.onMouseDown = function() return true end
-    sc.onMouseUp = function() return true end
-    sc.onMouseMove = function() return true end
-    sc.onRightMouseDown = function() return true end
-    sc.onRightMouseUp = function() return true end
-    -- 휠은 지도로 넘긴다 (기체 씬이 화면 가운데를 덮고 있다)
-    sc.onMouseWheel = function(_, del)
-        if S.map and S.map.onMouseWheel then S.map:onMouseWheel(del) end
-        return true
-    end
+    -- 마우스는 전부 지도로 넘긴다 (기체 씬이 지도 위를 덮고 있다). 지도 쪽은 좌표를 getMouseX/Y 로 다시 읽는다
+    forwardMouse(sc)
     self:addChild(sc)
     local j = sc.javaObject
     local ok, err = pcall(function()
@@ -309,6 +417,7 @@ end
 
 function SkyScene:prerender()
     if S.yaw == nil then return end
+    self:follow()
     self:applyTune()
 end
 
@@ -374,7 +483,7 @@ function SkyRoot:render()
     end
 end
 
--- 마우스가 지도를 끌거나 줌하지 못하게 전부 먹는다 (자식 요소도 같은 핸들러)
+-- 루트·타일 레이어는 마우스를 전부 먹는다 (월드 클릭으로 새지 않게). 벡터 지도는 드래그·휠, 기체 씬은 지도로 넘긴다
 local function eatMouse(cls)
     cls.onMouseDown = function() return true end
     cls.onMouseUp = function() return true end
@@ -385,8 +494,7 @@ local function eatMouse(cls)
 end
 eatMouse(SkyRoot)
 eatMouse(SkyTiles)
-eatMouse(SkyMap)
-eatMouse(SkyScene)
+forwardMouse(SkyScene)
 SkyMap.onMouseWheel = SkyMap.onMouseWheelZoom
 
 -- ── 공개 API ──────────────────────────────────────────────────────────────────
@@ -405,6 +513,7 @@ function HaloDropSky.open()
     S.open = true
     S.cover, S.coverTarget = 0, 0
     S.cx, S.cy, S.yaw, S.px, S.py = nil, nil, nil, nil, nil
+    S.panX, S.panY = 0, 0
     T.zoom, T.scale, T.tilt, T.yaw0 = K.SCENE_ZOOM, K.SCENE_SCALE, (K.TOP_DOWN and K.TILT_TOP or K.TILT), K.YAW0
     S.miniMapWasVisible = nil
     miniMapHide(true)

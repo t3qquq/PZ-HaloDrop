@@ -213,6 +213,9 @@ HaloDrop.SKY = {
     ZOOM_MIN   = 8.0,    -- 휠 확대·축소 범위 (UIWorldMap zoom). 시작값은 샌드박스 SkyZoom
     ZOOM_MAX   = 20.0,
     ZOOM_STEP  = 0.5,    -- 휠 한 칸당 zoom 변화
+    -- 11-18: 기체 모형이 지도 확대·축소를 따라간다 (씬 한 변 = 기본 x 2^(zoom - SkyZoom)). 너무 작아지거나 커지지 않게 자른다
+    PLANE_MIN  = 0.25,   -- 씬 한 변 최소 = 기본 크기 x 이 값 (zoom 을 2 이상 줄여도 더 작아지지 않음)
+    PLANE_MAX  = 3.0,    -- 씬 한 변 최대 = 화면 긴 변 x 이 값
     ROUTE_W    = 3,      -- 경로선 두께(px)
     YAW0       = 0,      -- 기수 방향 미세 보정(도). 기본 식은 view yaw = 315 + 차량 yaw(HaloDropFlight.yaw) -- 월드에서 setAngles 한
                          -- 차량을 아이소 카메라로 본 것과 같은 모습(UI3DScene.calcMatrices :2655 rotateXYZ 뒤에 객체 변환).

@@ -19,6 +19,9 @@ import java.lang.reflect.Method;
  * Viewpoint does not use that ambient for its 1st/3rd person view (run 11-17: override active, still black):
  * it reads its own light grid at the character's square. PatchVpSky/PatchVpLight swap those lookups for the
  * ground values below while a jumper is on that square. This class remembers where jumpers are (jumperAt).
+ * The jump plane (HaloDropC17, z 31) has the same problem: viewpoint.models.VehicleCapture reads the same two
+ * lookups (javap names only), so it came out as a black silhouette right before the jump (run 11-18, 6:42).
+ * scanPlanes() finds those vehicles in the cell every PLANE_SCAN_MS and planeAt() covers a box around each.
  * The class and the hook methods must be public: ZombieBuddy inlines the @Patch advice into the game class
  * (zombie.core.skinnedmodel.model.ModelInstance), which is in another package (0.1.0 was package-private ->
  * IllegalAccessError on every character render).
@@ -45,9 +48,23 @@ public final class SkyLight {
     private static Method mVpSky, mVpLight;
     private static boolean vpResolved, vpBroken;
     private static final ThreadLocal<boolean[]> inVp = ThreadLocal.withInitial(() -> new boolean[1]);
-    private static int vpLogged;
+    private static int vpLogged, vpPlaneLogged;
     private static long vpNextLog;
-    private static int vpSkySwaps, vpLightSwaps;
+    private static int vpSkySwaps, vpLightSwaps, vpPlaneSwaps;
+
+    // Halo Drop jump planes in the loaded cell (game thread scans, Viewpoint threads read)
+    static final String PLANE_SUFFIX = "HaloDropC17";
+    private static final long PLANE_SCAN_MS = 200L;
+    private static final int PLANE_REACH = 32;      // tiles around the vehicle origin (C-17 is about 53 tiles long)
+    private static final int PLANE_Z_REACH = 2;
+    private static final int PLANE_SLOTS = 4;
+    private static final int[] px = new int[PLANE_SLOTS], py = new int[PLANE_SLOTS], pz = new int[PLANE_SLOTS];
+    private static volatile int planeCount;
+    private static long nextPlaneScan;
+    private static boolean planeResolved, planeBroken;
+    private static Field fWorldInstance, fWorldCell;
+    private static Method mCellVehicles, mVehScript, mVehX, mVehY, mVehZ;
+    private static int lastPlaneCount;
 
     private SkyLight() {}
 
@@ -117,6 +134,7 @@ public final class SkyLight {
 
     public static void onInstanceLights(Object inst) {
         if (!ready(inst)) return;
+        scanPlanes(inst.getClass().getClassLoader());
         try {
             Object chr = fInstChar.get(inst);
             if (!inAir(chr)) return;
@@ -137,6 +155,8 @@ public final class SkyLight {
 
     public static void onSlotInit(Object slot) {
         if (!ready(slot)) return;
+        // vehicles come through here too (the player is hidden while the jump plane flies past)
+        scanPlanes(slot.getClass().getClassLoader());
         try {
             if (!inAir(fSlotChar.get(slot))) return;
             float a = sky();
@@ -167,6 +187,68 @@ public final class SkyLight {
         }
     }
 
+    private static void planeResolve(ClassLoader cl) throws Exception {
+        Class<?> w = Class.forName("zombie.iso.IsoWorld", false, cl);
+        fWorldInstance = w.getField("instance");
+        fWorldCell = w.getField("currentCell");
+        Class<?> cell = Class.forName("zombie.iso.IsoCell", false, cl);
+        mCellVehicles = cell.getMethod("getVehicles");
+        Class<?> veh = Class.forName("zombie.vehicles.BaseVehicle", false, cl);
+        mVehScript = veh.getMethod("getScriptName");
+        mVehX = veh.getMethod("getX");
+        mVehY = veh.getMethod("getY");
+        mVehZ = veh.getMethod("getZ");
+        planeResolved = true;
+        log("plane members resolved");
+    }
+
+    /** every PLANE_SCAN_MS: where the Halo Drop jump planes are (game thread, from the character light hook) */
+    private static void scanPlanes(ClassLoader cl) {
+        if (planeBroken) return;
+        long now = System.currentTimeMillis();
+        if (now < nextPlaneScan) return;
+        nextPlaneScan = now + PLANE_SCAN_MS;
+        try {
+            if (!planeResolved) planeResolve(cl);
+            Object world = fWorldInstance.get(null);
+            Object cell = world == null ? null : fWorldCell.get(world);
+            Object set = cell == null ? null : mCellVehicles.invoke(cell);
+            int n = 0;
+            if (set instanceof Iterable) {
+                for (Object v : (Iterable<?>) set) {
+                    if (n >= PLANE_SLOTS || v == null) continue;
+                    Object name = mVehScript.invoke(v);
+                    if (!(name instanceof String) || !((String) name).endsWith(PLANE_SUFFIX)) continue;
+                    int x = (int) Math.floor(((Number) mVehX.invoke(v)).doubleValue());
+                    int y = (int) Math.floor(((Number) mVehY.invoke(v)).doubleValue());
+                    int z = (int) Math.floor(((Number) mVehZ.invoke(v)).doubleValue());
+                    synchronized (px) { px[n] = x; py[n] = y; pz[n] = z; }
+                    n++;
+                }
+            }
+            planeCount = n;
+            if (n != lastPlaneCount) {
+                log(n > 0 ? ("jump plane tracked for light swap: count=" + n + " first at (" + px[0] + "," + py[0] + "," + pz[0] + ")")
+                          : "jump plane gone, plane light swap idle");
+                lastPlaneCount = n;
+            }
+        } catch (java.util.ConcurrentModificationException e) {
+            // the cell vehicle set changed mid-scan; try again next time
+        } catch (Throwable t) {
+            planeBroken = true;
+            log("plane scan failed, plane light swap off: " + t);
+        }
+    }
+
+    /** true when the square is inside the box around a tracked jump plane */
+    static boolean planeAt(int x, int y, int z) {
+        int n = planeCount;
+        for (int i = 0; i < n; i++) {
+            if (Math.abs(px[i] - x) <= PLANE_REACH && Math.abs(py[i] - y) <= PLANE_REACH && Math.abs(pz[i] - z) <= PLANE_Z_REACH) return true;
+        }
+        return false;
+    }
+
     /** true when a jumper was drawn on or next to this square in the last KEEP_MS (z within 1 level) */
     static boolean jumperAt(int x, int y, int z) {
         long now = System.currentTimeMillis();
@@ -195,28 +277,35 @@ public final class SkyLight {
     }
 
     private static void vpLog(String what, int x, int y, int z, Object orig, Object ground) {
-        if (vpLogged < 12) {
-            vpLogged++;
+        boolean planeLog = what.startsWith("plane");
+        if (planeLog ? vpPlaneLogged < 6 : vpLogged < 12) {
+            if (planeLog) vpPlaneLogged++; else vpLogged++;
             log("vp " + what + " swap at (" + x + "," + y + "," + z + ") orig=" + orig + " ground=" + ground);
         }
         long now = System.currentTimeMillis();
         if (now >= vpNextLog) {
             vpNextLog = now + 5000L;
-            log("vp ground swap active: sky=" + vpSkySwaps + " light=" + vpLightSwaps + " (last 5s)");
+            log("vp ground swap active: sky=" + vpSkySwaps + " light=" + vpLightSwaps + " plane=" + vpPlaneSwaps + " (last 5s)");
             vpSkySwaps = 0;
             vpLightSwaps = 0;
+            vpPlaneSwaps = 0;
         }
     }
 
     public static float vpSky(int x, int y, int z, boolean flag, float orig) {
-        if (z <= 0 || !jumperAt(x, y, z)) return orig;
+        if (z <= 0) return orig;
+        boolean plane = false;
+        if (!jumperAt(x, y, z)) {
+            if (!planeAt(x, y, z)) return orig;
+            plane = true;
+        }
         boolean[] busy = inVp.get();
         if (busy[0] || !vpReady()) return orig;
         busy[0] = true;
         try {
             float g = ((Number) mVpSky.invoke(null, x, y, 0, flag)).floatValue();
-            vpSkySwaps++;
-            vpLog("sky", x, y, z, orig, g);
+            if (plane) vpPlaneSwaps++; else vpSkySwaps++;
+            vpLog(plane ? "plane sky" : "sky", x, y, z, orig, g);
             return g;
         } catch (Throwable t) {
             fail("vp sky", t);
@@ -227,14 +316,19 @@ public final class SkyLight {
     }
 
     public static int vpLight(int x, int y, int z, int orig) {
-        if (z <= 0 || !jumperAt(x, y, z)) return orig;
+        if (z <= 0) return orig;
+        boolean plane = false;
+        if (!jumperAt(x, y, z)) {
+            if (!planeAt(x, y, z)) return orig;
+            plane = true;
+        }
         boolean[] busy = inVp.get();
         if (busy[0] || !vpReady()) return orig;
         busy[0] = true;
         try {
             int g = ((Number) mVpLight.invoke(null, x, y, 0)).intValue();
-            vpLightSwaps++;
-            vpLog("light", x, y, z, "0x" + Integer.toHexString(orig), "0x" + Integer.toHexString(g));
+            if (plane) vpPlaneSwaps++; else vpLightSwaps++;
+            vpLog(plane ? "plane light" : "light", x, y, z, "0x" + Integer.toHexString(orig), "0x" + Integer.toHexString(g));
             return g;
         } catch (Throwable t) {
             fail("vp light", t);

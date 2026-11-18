@@ -311,6 +311,28 @@ local function keyDown(name)
     return ok and v or false
 end
 
+-- 몸 방향을 정하고 애니메이션 각도도 바로 맞춘다 (11-18 런 영상 6:59~7:05: 방향을 틀 때 상체가 기괴하게 꺾였다).
+-- 바닐라는 애니메이션 각도가 목표를 늦게 따라가고, 차이가 1라디안(57도)을 넘으면 상체를 그쪽으로 비튼다
+-- (AnimationPlayer.interpolateBodyTwist / updateTwistBoneInternal, IsoPlayer.allowsTwist -> isTwisting). 비틀기는
+-- 모델 기준 세로축 회전이라 엎드리거나 머리부터 내려가는 자세에선 허리가 옆으로 꺾이는 모양이 된다.
+-- setTargetAndCurrentDirection 은 각도를 목표로 바로 옮기고 비틀기 목표를 0 으로 둔다. 회전 속도 제한은 heading 쪽에 이미 있다.
+local _snapOk = nil
+local function face(p, fx, fy)
+    if _snapOk ~= false then
+        local ok, err = pcall(function() p:setTargetAndCurrentDirection(fx, fy) end)
+        if ok then
+            if _snapOk == nil then
+                _snapOk = true
+                log("face: body angle snapped to heading every tick (no upper-body twist)")
+            end
+            return
+        end
+        _snapOk = false
+        log("face: setTargetAndCurrentDirection FAILED -> setForwardDirection only, err=" .. tostring(err))
+    end
+    p:setForwardDirection(fx, fy)
+end
+
 -- 각도 차이를 -180~180 으로
 local function wrapDeg(a)
     while a > 180 do a = a - 360 end
@@ -651,6 +673,9 @@ local function startJump(p, reason)
     HaloDropSky.setCover(1)
     send(p, "Jumped", { id = C.id, reason = reason, x = math.floor(x), y = math.floor(y) })
     hold(p, x, y, carryZ())
+    -- 자유낙하 자세를 대기 시작부터 건다 (11-18 런 6:43: 수송기 통과 뒤 자세가 바뀌는 동안 약 1초 선 자세로 떠 있었다).
+    -- 캐릭터는 수송기가 지나갈 때까지 숨겨져 있으니 나타나는 순간 이미 자유낙하 자세다. jump() 의 같은 호출은 그대로 둔다(같은 값이면 무시)
+    HaloDropPose.set(p, "freefall")
     log(string.format("jump start (%s): moved to route (%.0f,%.0f) frac=%.3f, waiting for ground (max %ds)",
         reason, x, y, HaloDropFlight.frac(C.fl, now - C.t0), HaloDrop.opt("JumpWaitMax")))
 end
@@ -785,7 +810,7 @@ local function onPlayerUpdate(p)
         hold(p, J.x, J.y, carry)
         local fx, fy = 1, 0
         if C.fl then fx, fy = HaloDropFlight.dir(C.fl) end
-        p:setForwardDirection(fx, fy)
+        face(p, fx, fy)
         if C.fl then HaloDropSky.update(J.x, J.y, HaloDropFlight.headingDeg(C.fl), dt) end
         local waited = now - jp.at
         if not jp.groundAt and p:getSquare() ~= nil then
@@ -966,7 +991,7 @@ local function onPlayerUpdate(p)
             end
         end
     end
-    p:setForwardDirection(hx, hy)
+    face(p, hx, hy)
     descentZoomTick()
 
     if not J.released and J.alt - J.vz * dt > carryAltM() then

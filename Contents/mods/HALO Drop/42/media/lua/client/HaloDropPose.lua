@@ -154,6 +154,19 @@ local function onServerCommand(module, command, args)
 end
 Events.OnServerCommand.Add(onServerCommand)
 
+-- 다른 플레이어 점퍼: 애니메이션 각도를 그 플레이어 몸 방향에 바로 맞춘다. 내 캐릭터는 점퍼(HaloDropJumper face)가 한다.
+-- 바닐라 상체 비틀기가 엎드린·거꾸로 선 자세에서 허리를 옆으로 꺾기 때문 (HaloDropJumper face 주석 참고)
+local _remoteSnapLogged = {}
+local function snapRemote(oid, pl)
+    local ok, err = pcall(function()
+        pl:setTargetAndCurrentDirection(pl:getForwardDirectionX(), pl:getForwardDirectionY())
+    end)
+    if not _remoteSnapLogged[oid] then
+        _remoteSnapLogged[oid] = true
+        log(string.format("pose remote: body angle snap oid=%s ok=%s%s", tostring(oid), tostring(ok), ok and "" or (" err=" .. tostring(err))))
+    end
+end
+
 local function approach(v, target, rate, dt)
     local k = rate * dt
     if k > 1 then k = 1 end
@@ -177,7 +190,10 @@ local function onTick()
         else
             pl, pose = getPlayerByOnlineID(key), _remote[key]
         end
-        if pl then pcall(applyBlend, pl, pose, b) end
+        if pl then
+            pcall(applyBlend, pl, pose, b)
+            if key ~= "me" then snapRemote(key, pl) end
+        end
     end
     -- 보내지 못하고 남은 마지막 목표 (간격 제한에 걸린 것)
     if _net.pendX and _mine and now - _net.lastMs >= P.NET_MIN_MS then
