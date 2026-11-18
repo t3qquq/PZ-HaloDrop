@@ -54,8 +54,9 @@ public final class SkyLight {
 
     // Halo Drop jump planes in the loaded cell (game thread scans, Viewpoint threads read)
     static final String PLANE_SUFFIX = "HaloDropC17";
-    private static final long PLANE_SCAN_MS = 200L;
-    private static final int PLANE_REACH = 32;      // tiles around the vehicle origin (C-17 is about 53 tiles long)
+    // the jump plane flies 200 tiles/s: 200 ms between scans left it 40 tiles past a 32-tile box (run 11-18 d27c7e2: plane swaps 0)
+    private static final long PLANE_SCAN_MS = 50L;
+    private static final int PLANE_REACH = 48;      // tiles around the vehicle origin (C-17 is about 53 tiles long)
     private static final int PLANE_Z_REACH = 2;
     // the vehicle's own z stays 0 while the client moves it with setWorldTransform (run 11-18 fix1:
     // "tracked ... at (5889,10123,0)", plane swaps 0, C-17 still black up close) -> use the flight level
@@ -297,7 +298,27 @@ public final class SkyLight {
         }
     }
 
+    // diagnostics: which levels Viewpoint asks about inside the plane box (is the C-17 lit through these lookups at all?)
+    private static int diagLow, diagMid, diagHigh;
+    private static long diagNext;
+    private static void planeDiag(int x, int y, int z) {
+        if (planeCount <= 0) return;
+        boolean inBox = false;
+        for (int i = 0; i < planeCount; i++)
+            if (Math.abs(px[i] - x) <= PLANE_REACH && Math.abs(py[i] - y) <= PLANE_REACH) { inBox = true; break; }
+        if (!inBox) return;
+        if (z <= 0) diagLow++; else if (z < PLANE_MIN_Z) diagMid++; else diagHigh++;
+        long now = System.currentTimeMillis();
+        if (now >= diagNext) {
+            if (diagNext != 0) log("plane box lookups (last 1s): z<=0 " + diagLow + ", z1-" + (PLANE_MIN_Z - 1) + " " + diagMid
+                    + ", z>=" + PLANE_MIN_Z + " " + diagHigh + " at plane (" + px[0] + "," + py[0] + "," + pz[0] + ")");
+            diagNext = now + 1000L;
+            diagLow = diagMid = diagHigh = 0;
+        }
+    }
+
     public static float vpSky(int x, int y, int z, boolean flag, float orig) {
+        planeDiag(x, y, z);
         if (z <= 0) return orig;
         boolean plane = false;
         if (!jumperAt(x, y, z)) {

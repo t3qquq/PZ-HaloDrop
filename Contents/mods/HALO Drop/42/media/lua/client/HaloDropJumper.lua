@@ -407,10 +407,16 @@ end
 local function camText(p)
     local look = "?"
     pcall(function() look = string.format("%.0f", math.deg(p:getLookAngleRadians())) end)
-    if not _cam.ok then return "none look=" .. look end
-    return string.format("mode=%s d=(%.2f,%.2f,%.2f) eyeYaw=%s eyePitch=%s look=%s target=%s",
+    -- 11-18 런(d27c7e2): Shift 다이브 중 카메라를 돌리면 몸이 꺾여 보였다. 상체 비틀기/머리 돌리기가 남는지 확인용
+    local tw = "?"
+    pcall(function()
+        tw = string.format("twist=%.0f/%.0f anim=%.0f headLook=%s/%.2f", p:getTwist(), p:getTargetTwist(),
+            math.deg(p:getAnimAngleRadians()), tostring(p:isHeadLookAround()), p:getHeadLookHorizontal())
+    end)
+    if not _cam.ok then return "none look=" .. look .. " " .. tw end
+    return string.format("mode=%s d=(%.2f,%.2f,%.2f) eyeYaw=%s eyePitch=%s look=%s target=%s %s",
         tostring(_cam.mode), _cam.dx, _cam.dy, _cam.dz, tostring(_cam.yaw), tostring(_cam.pitch), look,
-        J.camTarget and string.format("%.0f", J.camTarget) or "nil")
+        J.camTarget and string.format("%.0f", J.camTarget) or "nil", tw)
 end
 
 
