@@ -1,0 +1,102 @@
+-- Blue Zone 공용 상수·헬퍼 (서버·클라 공용)
+--
+-- 용어 (배그와 같음)
+--   파란 원(blue): 지금 데미지 경계. 밖에 있으면 초당 데미지.
+--   흰 원(white) : 이번 페이즈에 파란 원이 줄어들 목표. 대기(wait) 중에 미리 보인다.
+-- 진행: 시작 -> 지연(delay, 흰 원 없음) -> [페이즈 i: 대기(wait) -> 축소(shrink)] x N -> 끝(done)
+--   축소 중 파란 원은 중심·반지름 모두 흰 원으로 선형 보간한다.
+--   마지막 페이즈의 흰 원 반지름은 0 (배그처럼 끝까지 닫힘). done 에서도 데미지는 계속된다.
+--
+-- 진입점 (다른 모드·Round Manager 가 부르는 것): 모듈 BlueZone.MODULE 로 sendClientCommand
+--   Start      대기 상태에서만. 새 라운드 시작 (진행 중이면 무시 - 먼저 Stop)
+--              args { cx, cy } (선택): 페이즈 1 흰 원 중심 힌트. Round Manager 가 HALO Drop 비행 경로 근처를 넘길 용도.
+--              원이 영역 안에 들어가게 잘린다. 없으면 영역 안 무작위
+--   Pause      일시정지. 타이머와 데미지가 멈춘다 (멱등)
+--   Resume     재개 (멱등)
+--   NextPhase  현재 페이즈를 즉시 끝낸다: 파란 원을 흰 원에 붙이고 다음 페이즈 대기 시작.
+--              지연 중이면 페이즈 1 대기로. 일시정지 중이면 정지 상태를 유지한 채 넘어간다
+--   Stop       라운드 종료, 대기 상태로
+--   Sync       (권한 불필요) 현재 상태를 요청한 클라에게 다시 보낸다
+--   권한 검사는 서버(BlueZoneServer.lua onClientCommand)가 한다(admin). Sync 만 예외.
+-- 서버 -> 클라: State(스냅샷), Stopped
+--
+-- 페이즈 표는 하드코딩 (11-18 결정). 9페이즈 x 4값을 샌드박스로 빼면 관리가 안 된다.
+-- 운영 중 바꿀 일이 있는 전역 배율(대기·축소·데미지)·첫 원 크기·영역만 샌드박스.
+
+BlueZone = BlueZone or {}
+
+BlueZone.MODULE = "BlueZone"   -- 커맨드 모듈명 (다른 모드와 겹치지 않게)
+
+-- 시작 후 페이즈 1 흰 원이 보이기까지(초). WaitScale 이 곱해진다
+BlueZone.DELAY_SEC = 120
+
+-- 시작 파란 원 반지름 = 페이즈 1 흰 원 반지름 x 이 값 (중심은 페이즈 1 흰 원과 같다).
+-- 영역 전체를 덮는 원에서 시작하면 1페이즈 벽이 초당 10칸 넘게 움직여 뛰어서는 못 따라간다 (11-18 결정)
+BlueZone.START_RADIUS_MUL = 2.0
+
+-- PZ 기준 표 (11-18). 기본 판 길이 약 76분 = 하루 1~2판 목표. 1판만 하는 날은 WaitScale 로 대기만 늘린다.
+--   wait  : 대기(흰 원 표시, 벽 정지) 초. WaitScale 이 곱해진다. 파밍 시간 기준이라 초반을 길게
+--   shrink: 축소 초. ShrinkScale 이 곱해진다. 벽 속도가 대략 초당 2~3칸 이하가 되게 역산 (PZ 이동 속도 실측 전 추정)
+--   ratio : 이전 흰 원 반지름 대비. 배그와 같은 비율(2단계 0.65, 이후 0.5). 페이즈 1 은 샌드박스 FirstRadius
+--           FirstRadius 1500 기준 반지름 1500/975/488/244/122/61/30/15/0
+--   dps   : 자기장 밖 초당 체력(전체 100 기준, DamageScale 이 곱해진다). 배그 옛 PC 표(거리 보정 제외) 0.4~9, 마지막 11
+-- 누적(분, 배율 1.0): 지연 2 | 1: 17/30 | 2: 37/44 | 3: 49/54 | 4: 58/61 | 5: 63.5/65.5 | 6: 67.5/69 | 7: 70.5/71.75 | 8: 72.75/74 | 9: 74.75/76.25
+BlueZone.PHASES = {
+    { wait = 900, shrink = 780, ratio = nil,  dps = 0.4  },
+    { wait = 420, shrink = 420, ratio = 0.65, dps = 0.6  },
+    { wait = 300, shrink = 300, ratio = 0.5,  dps = 0.8  },
+    { wait = 240, shrink = 180, ratio = 0.5,  dps = 1.0  },
+    { wait = 150, shrink = 120, ratio = 0.5,  dps = 3.0  },
+    { wait = 120, shrink = 90,  ratio = 0.5,  dps = 5.0  },
+    { wait = 90,  shrink = 75,  ratio = 0.5,  dps = 7.0  },
+    { wait = 60,  shrink = 75,  ratio = 0.5,  dps = 9.0  },
+    { wait = 45,  shrink = 90,  ratio = 0.0,  dps = 11.0 },
+}
+
+function BlueZone.log(msg)
+    print("[BlueZone] " .. tostring(msg))
+end
+
+-- 등록된 샌드박스 옵션은 로드 후 항상 값이 있다 (fallback 불필요)
+function BlueZone.opt(name)
+    return SandboxVars.BlueZone[name]
+end
+
+-- 초 -> ms. kind: "wait"(지연·대기, WaitScale) / "shrink"(축소, ShrinkScale)
+function BlueZone.durMs(sec, kind)
+    local scale = kind == "shrink" and BlueZone.opt("ShrinkScale") or BlueZone.opt("WaitScale")
+    return math.floor(sec * 1000 * scale)
+end
+
+-- 이 페이즈의 초당 데미지. phase 0(지연) 은 0, 범위를 넘으면 마지막 값
+function BlueZone.dpsOf(phase)
+    if phase < 1 then return 0 end
+    local n = #BlueZone.PHASES
+    if phase > n then phase = n end
+    return BlueZone.PHASES[phase].dps
+end
+
+-- 상태(서버 S 또는 클라 스냅샷)와 구간 진행률 frac(0~1)로 지금 파란 원을 구한다.
+-- st: seg, fx, fy, fr (구간 시작 파란 원), wx, wy, wr (흰 원, 없으면 wr < 0)
+function BlueZone.blueAt(st, frac)
+    if st.seg ~= "shrink" or st.wr < 0 then
+        return st.fx, st.fy, st.fr
+    end
+    if frac < 0 then frac = 0 elseif frac > 1 then frac = 1 end
+    return st.fx + (st.wx - st.fx) * frac,
+           st.fy + (st.wy - st.fy) * frac,
+           st.fr + (st.wr - st.fr) * frac
+end
+
+function BlueZone.isOutside(x, y, cx, cy, r)
+    local dx, dy = x - cx, y - cy
+    return dx * dx + dy * dy > r * r
+end
+
+-- 면제 구역(대기실 오일리그). X2 > X1 이고 Y2 > Y1 일 때만 적용
+function BlueZone.inExempt(x, y)
+    local x1, y1 = BlueZone.opt("ExemptX1"), BlueZone.opt("ExemptY1")
+    local x2, y2 = BlueZone.opt("ExemptX2"), BlueZone.opt("ExemptY2")
+    if x2 <= x1 or y2 <= y1 then return false end
+    return x >= x1 and x <= x2 and y >= y1 and y <= y2
+end

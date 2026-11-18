@@ -1,0 +1,5 @@
+name=[ZEDGROUND] Blue Zone
+id=t3BlueZone
+description=배그식 자기장 (원 축소·자기장 밖 데미지)
+versionMin=42.21
+modversion=0.1.0

@@ -1,0 +1,325 @@
+-- Blue Zone 서버: 라운드 상태, 원 선정, 자기장 밖 데미지
+--
+-- 상태 S (nil = 대기)
+--   id, phase (0 = 지연, 1..N), seg ("delay" | "wait" | "shrink" | "done")
+--   segStart, segDur (ms), pausedAt (ms, 일시정지 중일 때만)
+--   from = { x, y, r }  구간 시작 시점의 파란 원 (wait/delay/done 에서는 그대로 현재 파란 원)
+--   white = { x, y, r } 이번 페이즈 목표. 지연·done 에서는 nil (지연 중 페이즈 1 원은 firstWhite 에 숨겨 둔다)
+-- 시작 파란 원 = 페이즈 1 흰 원과 같은 중심, 반지름 x START_RADIUS_MUL. 그 밖에 착지한 사람은 페이즈 1 부터 데미지
+-- 시간은 서버 getTimestampMs 기준. 클라에는 "구간 남은 ms" 로 보내고 클라가 자기 시계로 센다.
+-- 데미지: 서버가 BodyDamage:ReduceGeneralHealth 후 sendDamage(player) 로 BodyDamage 전체를 클라에 보낸다
+--   (바닐라 ISSmashWindow:complete 와 같은 방식, PlayerDamagePacket).
+
+if isClient() then return end
+
+require "BlueZoneConfig"
+
+local B = BlueZone
+local DAMAGE_INTERVAL_MS = 1000
+local SYNC_INTERVAL_MS   = 10000   -- 상태 재방송·상태 로그 주기
+
+local S = nil
+local _seq = 0
+
+local function log(msg) B.log(msg) end
+local function nowMs() return getTimestampMs() end
+
+local function players()
+    local out = {}
+    if isServer() then
+        local list = getOnlinePlayers()
+        for i = 0, list:size() - 1 do out[#out + 1] = list:get(i) end
+    else
+        local p = getPlayer()
+        if p then out[1] = p end
+    end
+    return out
+end
+
+-- SP 에서는 sendServerCommand 가 동작하지 않으므로 클라 핸들러를 직접 부른다
+local function toClients(cmd, args)
+    if isServer() then
+        sendServerCommand(B.MODULE, cmd, args)
+    elseif B.onServerCommand then
+        B.onServerCommand(B.MODULE, cmd, args)
+    end
+end
+
+local function toPlayer(p, cmd, args)
+    if isServer() then
+        sendServerCommand(p, B.MODULE, cmd, args)
+    elseif B.onServerCommand then
+        B.onServerCommand(B.MODULE, cmd, args)
+    end
+end
+
+-- ── 원 선정 ───────────────────────────────────────────────
+
+local function area()
+    return B.opt("AreaX1"), B.opt("AreaY1"), B.opt("AreaX2"), B.opt("AreaY2")
+end
+
+local function clamp(v, lo, hi)
+    if v < lo then return lo elseif v > hi then return hi end
+    return v
+end
+
+-- 페이즈 1 흰 원: 영역 안에 통째로 들어가는 원. hintX/hintY 가 있으면 그 점에 가장 가까운 자리, 없으면 무작위
+local function pickFirst(hintX, hintY)
+    local x1, y1, x2, y2 = area()
+    local r = B.opt("FirstRadius")
+    local maxR = math.min(x2 - x1, y2 - y1) / 2
+    if r > maxR then
+        log(string.format("FirstRadius %d larger than half of area (%.0f) -> clamped", r, maxR))
+        r = maxR
+    end
+    if hintX and hintY then
+        local cx, cy = clamp(hintX, x1 + r, x2 - r), clamp(hintY, y1 + r, y2 - r)
+        log(string.format("first circle from center hint (%.0f,%.0f) -> (%.0f,%.0f)", hintX, hintY, cx, cy))
+        return { x = cx, y = cy, r = r }
+    end
+    return { x = ZombRandFloat(x1 + r, x2 - r), y = ZombRandFloat(y1 + r, y2 - r), r = r }
+end
+
+-- 시작 파란 원: 페이즈 1 흰 원과 같은 중심, 반지름 x START_RADIUS_MUL
+local function initialBlue(first)
+    return { x = first.x, y = first.y, r = first.r * B.START_RADIUS_MUL }
+end
+
+-- 다음 흰 원: 이전 흰 원 안에 통째로 들어가는 무작위 원 (원판 위 균일 분포)
+local function pickNext(prev, ratio)
+    local r = prev.r * ratio
+    local maxOff = prev.r - r
+    local ang = ZombRandFloat(0, 2 * math.pi)
+    local d = maxOff * math.sqrt(ZombRandFloat(0, 1))
+    return { x = prev.x + math.cos(ang) * d, y = prev.y + math.sin(ang) * d, r = r }
+end
+
+-- ── 상태 ─────────────────────────────────────────────────
+
+local function elapsedMs(now)
+    local t = (S.pausedAt or now) - S.segStart
+    if t < 0 then t = 0 end
+    return t
+end
+
+local function remainMs(now)
+    if S.seg == "done" then return 0 end
+    local r = S.segDur - elapsedMs(now)
+    if r < 0 then r = 0 end
+    return r
+end
+
+local function snapshot(now)
+    local w = S.white
+    return {
+        id = S.id, phase = S.phase, n = #B.PHASES, seg = S.seg,
+        dur = S.segDur, remain = remainMs(now), paused = S.pausedAt ~= nil,
+        fx = S.from.x, fy = S.from.y, fr = S.from.r,
+        wx = w and w.x or 0, wy = w and w.y or 0, wr = w and w.r or -1,
+        dps = B.dpsOf(S.phase),
+    }
+end
+
+local function currentBlue(now)
+    local st = { seg = S.seg, fx = S.from.x, fy = S.from.y, fr = S.from.r,
+        wx = S.white and S.white.x or 0, wy = S.white and S.white.y or 0, wr = S.white and S.white.r or -1 }
+    local frac = 0
+    if S.segDur > 0 then frac = elapsedMs(now) / S.segDur end
+    return B.blueAt(st, frac)
+end
+
+local function broadcast(now, why)
+    toClients("State", snapshot(now))
+    log(string.format("state sent (%s): round=%d phase=%d/%d seg=%s remain=%dms paused=%s blue=(%.0f,%.0f r%.0f) white=%s",
+        why, S.id, S.phase, #B.PHASES, S.seg, remainMs(now), tostring(S.pausedAt ~= nil),
+        S.from.x, S.from.y, S.from.r,
+        S.white and string.format("(%.0f,%.0f r%.0f)", S.white.x, S.white.y, S.white.r) or "none"))
+end
+
+local function setSeg(now, seg, durSec)
+    S.seg = seg
+    S.segStart = now
+    S.segDur = durSec and B.durMs(durSec, seg) or 0
+    if S.pausedAt then S.pausedAt = now end
+end
+
+-- 구간 하나 진행 (시간이 다 됐거나 NextPhase)
+local function advance(now, why)
+    if S.seg == "delay" then
+        S.phase = 1
+        S.white = S.firstWhite
+        S.firstWhite = nil
+        setSeg(now, "wait", B.PHASES[1].wait)
+    elseif S.seg == "wait" then
+        setSeg(now, "shrink", B.PHASES[S.phase].shrink)
+    elseif S.seg == "shrink" then
+        S.from = S.white   -- 파란 원이 흰 원에 닿음
+        S.white = nil
+        local nextPhase = S.phase + 1
+        if nextPhase > #B.PHASES then
+            setSeg(now, "done", nil)
+        else
+            S.phase = nextPhase
+            S.white = pickNext(S.from, B.PHASES[nextPhase].ratio)
+            setSeg(now, "wait", B.PHASES[nextPhase].wait)
+        end
+    else
+        return
+    end
+    broadcast(now, why)
+end
+
+local function startRound(by, hintX, hintY)
+    _seq = _seq + 1
+    local now = nowMs()
+    local first = pickFirst(hintX, hintY)
+    S = { id = _seq, phase = 0, from = initialBlue(first), white = nil, firstWhite = first,
+        nextDamage = now + DAMAGE_INTERVAL_MS, nextSync = now + SYNC_INTERVAL_MS, hurt = {}, lastPos = {} }
+    setSeg(now, "delay", B.DELAY_SEC)
+    local x1, y1, x2, y2 = area()
+    log(string.format("round %d started by %s: area=(%d,%d)-(%d,%d) waitScale=%.2f shrinkScale=%.2f damageScale=%.2f first=(%.0f,%.0f r%.0f) start blue r%.0f",
+        S.id, tostring(by), x1, y1, x2, y2, B.opt("WaitScale"), B.opt("ShrinkScale"), B.opt("DamageScale"),
+        first.x, first.y, first.r, S.from.r))
+    broadcast(now, "start")
+end
+
+local function stopRound(reason)
+    if not S then return end
+    log("round " .. tostring(S.id) .. " stopped (" .. tostring(reason) .. ")")
+    toClients("Stopped", { id = S.id })
+    S = nil
+end
+
+-- ── 데미지 ───────────────────────────────────────────────
+
+local function damageTick(now)
+    local dps = B.dpsOf(S.phase) * B.opt("DamageScale")
+    if dps <= 0 then return end
+    local cx, cy, r = currentBlue(now)
+    local amount = dps * DAMAGE_INTERVAL_MS / 1000
+    for _, p in ipairs(players()) do
+        if not p:isDead() and not p:isGodMod() then
+            local x, y = p:getX(), p:getY()
+            if not B.inExempt(x, y) and B.isOutside(x, y, cx, cy, r) then
+                local bd = p:getBodyDamage()
+                local before = bd:getOverallBodyHealth()
+                bd:ReduceGeneralHealth(amount)
+                if isServer() then sendDamage(p) end
+                -- 페이즈마다 사람별 첫 피격만 남긴다 (매초 로그 방지). 이후 수치는 상태 로그에서 본다
+                local key = tostring(p:getOnlineID()) .. ":" .. tostring(S.phase)
+                if not S.hurt[key] then
+                    S.hurt[key] = true
+                    log(string.format("damage %s phase=%d amount=%.2f health %.1f -> %.1f at (%.0f,%.0f) blue=(%.0f,%.0f r%.0f)",
+                        tostring(p:getUsername()), S.phase, amount, before, bd:getOverallBodyHealth(), x, y, cx, cy, r))
+                end
+            end
+        end
+    end
+end
+
+-- 사람별 이동 속도(타일/초, 직전 상태 로그 이후 직선거리). PZ 달리기 속도를 재서 축소 시간을 맞추는 용도
+local function speedLog(now)
+    local parts = {}
+    for _, p in ipairs(players()) do
+        if not p:isDead() then
+            local key = tostring(p:getOnlineID())
+            local x, y = p:getX(), p:getY()
+            local last = S.lastPos[key]
+            if last and now > last.t then
+                local d = math.sqrt((x - last.x) * (x - last.x) + (y - last.y) * (y - last.y))
+                parts[#parts + 1] = string.format("%s=%.2f%s", tostring(p:getUsername()), d * 1000 / (now - last.t),
+                    p:getVehicle() and "(vehicle)" or "")
+            end
+            S.lastPos[key] = { x = x, y = y, t = now }
+        end
+    end
+    if #parts > 0 then log("speed tiles/s (last interval): " .. table.concat(parts, " ")) end
+end
+
+local function statusLog(now)
+    speedLog(now)
+    local cx, cy, r = currentBlue(now)
+    local outside = {}
+    for _, p in ipairs(players()) do
+        if not p:isDead() then
+            local x, y = p:getX(), p:getY()
+            if B.isOutside(x, y, cx, cy, r) and not B.inExempt(x, y) then
+                outside[#outside + 1] = string.format("%s(hp%.0f%s)", tostring(p:getUsername()),
+                    p:getBodyDamage():getOverallBodyHealth(), p:isGodMod() and ",god" or "")
+            end
+        end
+    end
+    log(string.format("status round=%d phase=%d seg=%s remain=%dms paused=%s blue=(%.0f,%.0f r%.0f) outside[%s]",
+        S.id, S.phase, S.seg, remainMs(now), tostring(S.pausedAt ~= nil), cx, cy, r, table.concat(outside, " ")))
+end
+
+local function onTick()
+    if not S then return end
+    local now = nowMs()
+    if S.pausedAt then return end
+    if S.seg ~= "done" and now - S.segStart >= S.segDur then
+        advance(now, "timer")
+    end
+    if now >= S.nextDamage then
+        S.nextDamage = now + DAMAGE_INTERVAL_MS
+        damageTick(now)
+    end
+    if now >= S.nextSync then
+        S.nextSync = now + SYNC_INTERVAL_MS
+        statusLog(now)
+        toClients("State", snapshot(now))   -- 클라 시계 오차 보정용 재방송 (로그는 statusLog 로 대신)
+    end
+end
+Events.OnTick.Add(onTick)
+
+-- ── 명령 ─────────────────────────────────────────────────
+
+local function isAdminPlayer(p)
+    if not isServer() then return true end   -- SP
+    return p:isAccessLevel("admin")
+end
+
+local ADMIN_ONLY = { Start = true, Pause = true, Resume = true, NextPhase = true, Stop = true }
+
+local function onClientCommand(module, command, player, args)
+    if module ~= B.MODULE then return end
+    local who = tostring(player and player:getUsername())
+    if ADMIN_ONLY[command] and not isAdminPlayer(player) then
+        log(command .. " denied for " .. who)
+        return
+    end
+    local now = nowMs()
+    if command == "Start" then
+        if S then
+            log("Start ignored: round " .. tostring(S.id) .. " already running (send Stop first)")
+            return
+        end
+        local hx, hy = tonumber(args and args.cx), tonumber(args and args.cy)
+        startRound(who, hx, hy)
+    elseif command == "Pause" then
+        if not S or S.pausedAt then return end
+        S.pausedAt = now
+        log("paused by " .. who)
+        broadcast(now, "pause")
+    elseif command == "Resume" then
+        if not S or not S.pausedAt then return end
+        S.segStart = S.segStart + (now - S.pausedAt)
+        S.pausedAt = nil
+        S.nextDamage = now + DAMAGE_INTERVAL_MS
+        log("resumed by " .. who)
+        broadcast(now, "resume")
+    elseif command == "NextPhase" then
+        if not S or S.seg == "done" then return end
+        log("next phase by " .. who .. " (from phase=" .. S.phase .. " seg=" .. S.seg .. ")")
+        if S.seg == "wait" then
+            S.seg = "shrink"   -- 대기를 건너뛰고 축소를 즉시 끝낸다
+        end
+        advance(now, "next phase")
+    elseif command == "Stop" then
+        stopRound("admin " .. who)
+    elseif command == "Sync" then
+        if S then toPlayer(player, "State", snapshot(now)) end
+    end
+end
+Events.OnClientCommand.Add(onClientCommand)

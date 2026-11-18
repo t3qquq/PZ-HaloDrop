@@ -1,0 +1,8 @@
+{
+  "ContextMenu_BlueZone": "자기장",
+  "ContextMenu_BlueZone_Start": "자기장 시작",
+  "ContextMenu_BlueZone_Pause": "일시정지",
+  "ContextMenu_BlueZone_Resume": "재개",
+  "ContextMenu_BlueZone_NextPhase": "다음 페이즈 (현재 원 즉시 축소 완료)",
+  "ContextMenu_BlueZone_Stop": "자기장 종료"
+}

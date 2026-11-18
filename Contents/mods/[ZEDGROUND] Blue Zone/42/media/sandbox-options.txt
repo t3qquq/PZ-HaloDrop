@@ -1,0 +1,61 @@
+VERSION = 1,
+
+option BlueZone.WaitScale = {
+    type = double, min = 0.05, max = 5.0, default = 1.0,
+    page = BlueZone, translation = BlueZone_WaitScale,
+}
+
+option BlueZone.ShrinkScale = {
+    type = double, min = 0.05, max = 5.0, default = 1.0,
+    page = BlueZone, translation = BlueZone_ShrinkScale,
+}
+
+option BlueZone.DamageScale = {
+    type = double, min = 0.0, max = 10.0, default = 1.0,
+    page = BlueZone, translation = BlueZone_DamageScale,
+}
+
+option BlueZone.FirstRadius = {
+    type = integer, min = 100, max = 10000, default = 1500,
+    page = BlueZone, translation = BlueZone_FirstRadius,
+}
+
+option BlueZone.AreaX1 = {
+    type = integer, min = 0, max = 100000, default = 1500,
+    page = BlueZone, translation = BlueZone_AreaX1,
+}
+
+option BlueZone.AreaY1 = {
+    type = integer, min = 0, max = 100000, default = 800,
+    page = BlueZone, translation = BlueZone_AreaY1,
+}
+
+option BlueZone.AreaX2 = {
+    type = integer, min = 0, max = 100000, default = 15000,
+    page = BlueZone, translation = BlueZone_AreaX2,
+}
+
+option BlueZone.AreaY2 = {
+    type = integer, min = 0, max = 100000, default = 13500,
+    page = BlueZone, translation = BlueZone_AreaY2,
+}
+
+option BlueZone.ExemptX1 = {
+    type = integer, min = 0, max = 100000, default = 19196,
+    page = BlueZone, translation = BlueZone_ExemptX1,
+}
+
+option BlueZone.ExemptY1 = {
+    type = integer, min = 0, max = 100000, default = 252,
+    page = BlueZone, translation = BlueZone_ExemptY1,
+}
+
+option BlueZone.ExemptX2 = {
+    type = integer, min = 0, max = 100000, default = 19231,
+    page = BlueZone, translation = BlueZone_ExemptX2,
+}
+
+option BlueZone.ExemptY2 = {
+    type = integer, min = 0, max = 100000, default = 292,
+    page = BlueZone, translation = BlueZone_ExemptY2,
+}
