@@ -1,6 +1,6 @@
 {
   "IGUI_HaloDrop_Prep": "수송기 출발까지 %1초",
-  "IGUI_HaloDrop_RoutePrep": "비행 경로 준비 중  %1 / %2  (남은 시간 약 %3)",
+  "IGUI_HaloDrop_RoutePrep": "비행 경로 준비 중",
   "IGUI_HaloDrop_Aboard": "[%1] 뛰어내리기",
   "IGUI_HaloDrop_Freefall": "자유낙하  %1 m   [%2] 낙하산 펼치기",
   "IGUI_HaloDrop_Canopy": "낙하산 강하  %1 m",

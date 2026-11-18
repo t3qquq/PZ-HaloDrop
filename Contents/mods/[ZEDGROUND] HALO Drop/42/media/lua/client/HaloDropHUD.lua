@@ -33,25 +33,37 @@ local function lineFor(J)
     return nil
 end
 
--- 경로 준비(출발 전) 진행률. 탑승 전이라 J.state 가 없다
-local function prepLine(P)
-    local eta = "?"
-    if P.eta and P.eta >= 0 then
-        local s = math.floor(P.eta / 1000)
-        eta = string.format("%d:%02d", math.floor(s / 60), s % 60)
+-- 경로 준비(출발 전) 진행률: 문구 + 진행 막대. 탑승 전이라 J.state 가 없다
+local PREP_BAR_W, PREP_BAR_H = 360, 8
+
+local function drawPrep(P)
+    local x = getCore():getScreenWidth() / 2
+    local y = 60
+    local tm = getTextManager()
+    local text = getText("IGUI_HaloDrop_RoutePrep")
+    tm:DrawStringCentre(UIFont.Large, x + 2, y + 2, text, 0, 0, 0, 0.8)
+    tm:DrawStringCentre(UIFont.Large, x, y, text, 1, 1, 1, 1)
+
+    local ratio = 0
+    if P.total and P.total > 0 and P.done then
+        ratio = math.max(0, math.min(1, P.done / P.total))
     end
-    return getText("IGUI_HaloDrop_RoutePrep", tostring(P.done), tostring(P.total), eta)
+    local bx = math.floor(x - PREP_BAR_W / 2)
+    local by = y + 32
+    local r = getRenderer()
+    r:renderRect(bx - 1, by - 1, PREP_BAR_W + 2, PREP_BAR_H + 2, 0, 0, 0, 0.8)
+    r:renderRect(bx, by, PREP_BAR_W, PREP_BAR_H, 0.25, 0.25, 0.25, 0.8)
+    local fw = math.floor(PREP_BAR_W * ratio)
+    if fw > 0 then
+        r:renderRect(bx, by, fw, PREP_BAR_H, 1, 1, 1, 1)
+    end
 end
 
 local function onPostUIDraw()
     local J = HaloDrop.J
     local C = HaloDrop.C
     if (not J or not J.state) and C and C.prep then
-        local text = prepLine(C.prep)
-        local x = getCore():getScreenWidth() / 2
-        local tm = getTextManager()
-        tm:DrawStringCentre(UIFont.Large, x + 2, 62, text, 0, 0, 0, 0.8)
-        tm:DrawStringCentre(UIFont.Large, x, 60, text, 1, 1, 1, 1)
+        drawPrep(C.prep)
         return
     end
     if not J or not J.state then return end

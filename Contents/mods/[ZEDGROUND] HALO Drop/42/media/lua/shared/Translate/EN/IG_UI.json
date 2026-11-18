@@ -1,6 +1,6 @@
 {
   "IGUI_HaloDrop_Prep": "Plane departs in %1 s",
-  "IGUI_HaloDrop_RoutePrep": "Preparing flight route  %1 / %2  (about %3 left)",
+  "IGUI_HaloDrop_RoutePrep": "Preparing flight route",
   "IGUI_HaloDrop_Aboard": "[%1] Jump",
   "IGUI_HaloDrop_Freefall": "Free fall  %1 m   [%2] Open parachute",
   "IGUI_HaloDrop_Canopy": "Parachute  %1 m",
