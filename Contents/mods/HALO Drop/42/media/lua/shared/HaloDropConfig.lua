@@ -39,6 +39,33 @@ HaloDrop.ROUTE_PREGEN = {
     REPORT_MS   = 5000,     -- 진행 로그·방송 주기
 }
 
+-- 비행 경로: 마을 기준 A'->A->B->B' (11-18, server/HaloDropServer.lua pickFlight).
+--   A = TOWNS 중 무작위 한 곳의 중점에서 반경 TOWN_RADIUS 안 무작위 점.
+--   B = A 마을과 중점 거리가 MAX_PAIR 두 마을 사이 거리 이하인 다른 마을에서 같은 방식으로 뽑은 점.
+--   A' = A 에서 B 반대쪽으로 |AB| x EXTEND, B' = B 에서 진행 방향으로 |AB| x EXTEND (EXTEND 0.25 = 전체 1.5배, 0.5 = 2배).
+--   A'·B' 는 비행 박스(WorldX1~Y2) 밖이나 빈 북서쪽(AvoidEmptyNW)에 닿으면 그 앞에서 자른다.
+-- 루이빌·밸리스테이션은 후보에서 뺀다 (어빙턴~루이빌처럼 지나치게 긴 경로가 걸리면 준비 시간이 오히려 늘어서).
+-- 중점 = pzmap.org 42.20 마을 이름표 위치. 비행 박스 밖 마을은 후보에서 빠지고, 2곳 미만이면 이전 무작위 직선 방식.
+HaloDrop.ROUTE = {
+    TOWN_RADIUS = 1280,                     -- 20 셀(64칸) = 1280칸
+    EXTEND      = 0.25,
+    MAX_PAIR    = { "Muldraugh", "Ekron" }, -- 약 10240칸
+    TOWNS = {
+        { name = "Brandenburg", x = 2233,  y = 6208 },
+        { name = "Ekron",       x = 677,   y = 9933 },
+        { name = "Coalfield",   x = 3587,  y = 8326 },
+        { name = "Riverside",   x = 6575,  y = 5413 },
+        { name = "Echo Creek",  x = 3650,  y = 11058 },
+        { name = "Fallas Lake", x = 7408,  y = 8477 },
+        { name = "Irvington",   x = 2630,  y = 14385 },
+        { name = "Rosewood",    x = 8239,  y = 11708 },
+        { name = "Muldraugh",   x = 10916, y = 10082 },
+        { name = "March Ridge", x = 10253, y = 12852 },
+        { name = "West Point",  x = 11828, y = 6967 },
+        -- 제외: Louisville (13068, 2370), Valley Station (13647, 5214)
+    },
+}
+
 HaloDrop.PRELOAD = {
     ENABLED      = true,
     AGENT_VERSION = 1.0,  -- server-agent/HaloDropAgent.jar 의 Agent.VERSION. jar 를 바꾸면 같이 올린다 (다르면 재설치 경고)

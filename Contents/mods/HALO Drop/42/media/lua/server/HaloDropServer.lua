@@ -303,7 +303,8 @@ local function inZone(zone, p)
 end
 
 -- ── 경로 선정 ─────────────────────────────────────────────────────────────────
--- 비행 박스(WorldX1~Y2) 를 가로지르는 무작위 직선. 박스 가운데 60% 안의 점 P 를 지나는 무작위 각도의
+-- 기본은 마을 기준 A'->A->B->B' (pickFlight, 규칙은 HaloDropConfig HaloDrop.ROUTE).
+-- 아래 pickBoxFlight 는 후보 마을이 모자랄 때 쓰는 이전 방식: 비행 박스(WorldX1~Y2) 를 가로지르는 무작위 직선. 박스 가운데 60% 안의 점 P 를 지나는 무작위 각도의
 -- 직선을 박스 테두리로 잘라 A(진입)·B(진출)로 쓴다. 길이가 박스 짧은 변의 절반보다 짧으면 다시 뽑는다.
 local PATH_TRIES = 48   -- AvoidEmptyNW 거부분까지 감안해 16 -> 48
 
@@ -356,7 +357,7 @@ local function crossesEmptyNW(ax, ay, bx, by)
     return false
 end
 
-local function pickFlight(speed)
+local function pickBoxFlight(speed)
     local box = flightBox()
     local w, h = box.x2 - box.x1, box.y2 - box.y1
     local minLen = math.min(w, h) * 0.5
@@ -382,6 +383,109 @@ local function pickFlight(speed)
             best.emptyNW and " -- ALL rejected, using one anyway" or ""))
     end
     return best, box
+end
+
+-- 마을 기준 경로 ---------------------------------------------------------------
+local function rand01() return ZombRand(1000000) / 1000000 end
+
+local function inBox(box, x, y) return x >= box.x1 and x <= box.x2 and y >= box.y1 and y <= box.y2 end
+
+local function clampBox(box, x, y)
+    if x < box.x1 then x = box.x1 elseif x > box.x2 then x = box.x2 end
+    if y < box.y1 then y = box.y1 elseif y > box.y2 then y = box.y2 end
+    return x, y
+end
+
+-- 마을 중점에서 반경 r 안 균일 무작위 점 (박스 안으로 당김)
+local function pointNear(box, town, r)
+    local d = r * math.sqrt(rand01())
+    local th = rand01() * 2 * math.pi
+    return clampBox(box, town.x + math.cos(th) * d, town.y + math.sin(th) * d)
+end
+
+local function townDist(a, b) return math.sqrt((a.x - b.x) ^ 2 + (a.y - b.y) ^ 2) end
+
+-- MAX_PAIR 두 마을 중점 사이 거리. 이름이 TOWNS 에 없으면 nil (제한 없음)
+local function maxPairDist(cfg)
+    local a, b
+    for _, t in ipairs(cfg.TOWNS) do
+        if t.name == cfg.MAX_PAIR[1] then a = t end
+        if t.name == cfg.MAX_PAIR[2] then b = t end
+    end
+    if not a or not b then return nil end
+    return townDist(a, b)
+end
+
+-- (x, y) 에서 (ux, uy) 방향으로 최대 len 칸. 박스 밖이나 빈 북서쪽에 닿기 직전까지만 간다 (64칸 간격).
+local function extendTo(box, avoid, x, y, ux, uy, len)
+    local n = math.max(1, math.ceil(len / 64))
+    local lx, ly = x, y
+    for i = 1, n do
+        local d = len * i / n
+        local px, py = x + ux * d, y + uy * d
+        if not inBox(box, px, py) or (avoid and inEmptyNW(px, py)) then
+            return lx, ly, true
+        end
+        lx, ly = px, py
+    end
+    return lx, ly, false
+end
+
+local function pickFlight(speed)
+    local box = flightBox()
+    local cfg = HaloDrop.ROUTE
+    local towns = {}
+    for _, t in ipairs(cfg.TOWNS) do
+        if inBox(box, t.x, t.y) then towns[#towns + 1] = t end
+    end
+    if #towns < 2 then
+        log(string.format("flight path: only %d town(s) inside flight box -> random line", #towns))
+        return pickBoxFlight(speed)
+    end
+    local maxPair = maxPairDist(cfg)
+    if not maxPair then
+        log(string.format("flight path: MAX_PAIR towns %s/%s not in TOWNS -> no distance limit",
+            tostring(cfg.MAX_PAIR[1]), tostring(cfg.MAX_PAIR[2])))
+    end
+
+    -- A 마을: 거리 조건을 만족하는 B 후보가 하나라도 있는 마을 중에서 무작위
+    local starts = {}
+    for _, a in ipairs(towns) do
+        for _, b in ipairs(towns) do
+            if b ~= a and (not maxPair or townDist(a, b) <= maxPair) then
+                starts[#starts + 1] = a
+                break
+            end
+        end
+    end
+    if #starts == 0 then
+        log("flight path: no town pair within MAX_PAIR distance -> random line")
+        return pickBoxFlight(speed)
+    end
+    local ta = starts[ZombRand(#starts) + 1]
+    local ends = {}
+    for _, b in ipairs(towns) do
+        if b ~= ta and (not maxPair or townDist(ta, b) <= maxPair) then ends[#ends + 1] = b end
+    end
+    local tb = ends[ZombRand(#ends) + 1]
+
+    local ax, ay = pointNear(box, ta, cfg.TOWN_RADIUS)
+    local bx, by = pointNear(box, tb, cfg.TOWN_RADIUS)
+    local ab = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+    if ab < 1 then
+        log("flight path: A and B collapsed to one point -> random line")
+        return pickBoxFlight(speed)
+    end
+    local ux, uy = (bx - ax) / ab, (by - ay) / ab
+    local avoid = HaloDrop.opt("AvoidEmptyNW")
+    local ext = ab * cfg.EXTEND
+    local a2x, a2y, cutA = extendTo(box, avoid, ax, ay, -ux, -uy, ext)
+    local b2x, b2y, cutB = extendTo(box, avoid, bx, by, ux, uy, ext)
+    local fl = HaloDropFlight.makeAB(a2x, a2y, b2x, b2y, speed)
+    log(string.format("flight path: towns %s -> %s (center dist %.0f, limit %s, candidates A=%d B=%d) A=(%.0f,%.0f) B=(%.0f,%.0f) AB=%.0f A'=(%.0f,%.0f)%s B'=(%.0f,%.0f)%s len=%.0f",
+        ta.name, tb.name, townDist(ta, tb), maxPair and string.format("%.0f", maxPair) or "none", #starts, #ends,
+        ax, ay, bx, by, ab, a2x, a2y, cutA and " (cut)" or "", b2x, b2y, cutB and " (cut)" or "", fl.length))
+    return fl, box
 end
 
 -- ── 라운드 ────────────────────────────────────────────────────────────────────
