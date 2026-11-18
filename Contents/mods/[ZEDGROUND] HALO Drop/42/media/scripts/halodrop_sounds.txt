@@ -27,7 +27,7 @@ module HaloDrop
 
     /* 경로 준비(출발 전) 대기 음악. ZEDGROUND 메인 테마. 재생·정지는 HaloDropClient.lua 가
        UI emitter(2D)로 한다. Prep 이 3분 44초보다 길어지면 처음부터 반복한다.
-       음량은 스크립트 volume 이 아니라 음원 자체에 -11dB 를 구워 넣었다 (약 -24 LUFS). */
+       음량은 스크립트 volume 이 아니라 음원 자체에 -17dB 를 구워 넣었다 (약 -30 LUFS, 11-19 -11dB 에서 반으로 더 줄임). */
     sound halodrop_main_theme
     {
         category = Object,
