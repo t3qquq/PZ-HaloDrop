@@ -11,7 +11,9 @@ import java.lang.reflect.Method;
  * Fields used: phase, seg, dur, remain, paused, recvAt (getTimestampMs = System.currentTimeMillis), fx fy fr, wx wy wr.
  * The blue circle exists from the phase 1 shrink on (BlueZone.blueActive in BlueZoneConfig.lua): nothing to draw
  * during the phase 1 wait. During "shrink" it moves from f* to w* linearly, as BlueZone.blueAt does.
- * Player: IsoPlayer.getInstance() x / y, used to match Viewpoint's render axes and to pick the arc near the player.
+ * Player: IsoPlayer.getInstance() x / y, used to pick the arc near the player.
+ * Camera: BlueZone.VP { yaw, at } (BlueZoneDisplay.lua, Viewpoint's eye yaw in world atan2(dy, dx) degrees and the
+ * getTimestampMs it was read at), used by BlueZoneWall to check its axis mapping. NaN when Lua has not sent one.
  * Everything is reached by reflection (Kahlua table / game classes), so the jar needs no game jar to build.
  */
 public final class ZoneState {
@@ -25,6 +27,8 @@ public final class ZoneState {
 
     static double px, py;
     static boolean hasPlayer;
+    static double camYaw = Double.NaN;
+    static long camYawAt;
 
     private static void fail(String where, Throwable t) {
         errors++;
@@ -77,7 +81,12 @@ public final class ZoneState {
                 px = ((Number) mGetX.invoke(p)).doubleValue();
                 py = ((Number) mGetY.invoke(p)).doubleValue();
             }
-            Object c = get(get(fEnv.get(null), "BlueZone"), "C");
+            Object bz = get(fEnv.get(null), "BlueZone");
+            Object vp = get(bz, "VP");
+            double yaw = num(vp, "yaw"), at = num(vp, "at");
+            camYaw = yaw;
+            camYawAt = Double.isNaN(at) ? 0L : (long) at;
+            Object c = get(bz, "C");
             if (c == null) { note("no round"); return null; }
             double phase = num(c, "phase");
             Object seg = get(c, "seg");

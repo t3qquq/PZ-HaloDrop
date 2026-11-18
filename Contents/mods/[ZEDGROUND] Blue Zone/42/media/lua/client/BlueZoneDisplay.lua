@@ -4,7 +4,7 @@
 -- 시점별
 --   아이소(바닐라 쿼터뷰): 플레이어 근처 원호를 isoToScreenX/Y 로 투영해 선으로 그린다
 --   Viewpoint 1·3인칭  : isoToScreenX/Y 가 아이소 값을 돌려줘 선이 엉뚱한 곳에 뜨므로 그리지 않는다
---                        (실제 벽은 자바 애드온 담당, 2단계)
+--                        (실제 벽은 클라 자바 src/t3bluezone 담당. 카메라 yaw 를 BlueZone.VP 로 넘겨준다)
 --   지도·미니맵·틴트는 UI 라 시점과 무관하게 그린다
 -- 원 데이터는 BlueZoneClient.lua 의 BlueZone.currentBlue() / BlueZone.C (흰 원 wx, wy, wr) 에서 읽는다.
 
@@ -59,6 +59,28 @@ local function viewpointActive()
     return on
 end
 B.viewpointActive = viewpointActive
+
+-- Viewpoint 카메라 방향을 자바 벽(src/t3bluezone/BlueZoneWall)에 넘긴다. 자바는 이 값으로 월드 좌표 -> Viewpoint 렌더 좌표의
+-- 축 대응(부호·x/y 바뀜)을 검증한다 (11-19 런: 축을 못 맞춰 벽이 한 번도 안 그려졌다).
+-- B.VP 는 한 번 만들고 필드만 갱신한다. yaw = Viewpoint.Addons.viewState().eye.yaw (월드 atan2(dy, dx) 기준 도), at = 읽은 시각(ms)
+B.VP = B.VP or { at = 0 }
+local _camLogged = nil
+local function publishCamera()
+    local ok, st = pcall(function()
+        if Viewpoint and Viewpoint.Addons and Viewpoint.Addons.viewState then return Viewpoint.Addons.viewState() end
+        return nil
+    end)
+    local yaw = nil
+    if ok and st and st.on and st.eye then yaw = st.eye.yaw end
+    local state = (not ok) and ("FAILED " .. tostring(st)) or (yaw ~= nil and "ok" or "no view state")
+    if state ~= _camLogged then
+        _camLogged = state
+        log("display: camera yaw for the viewpoint wall -> " .. state .. (yaw ~= nil and string.format(" (yaw=%.1f)", yaw) or ""))
+    end
+    if yaw == nil then return end
+    B.VP.yaw = yaw
+    B.VP.at = getTimestampMs()
+end
 
 -- ── 아이소 땅 위 원호 ─────────────────────────────────────
 local function drawWorldArc(playerNum, p, cx, cy, r, c)
@@ -118,6 +140,8 @@ local function onPreUIDraw()
     if not viewpointActive() then
         if C.wr >= 0 then drawWorldArc(0, p, C.wx, C.wy, C.wr, D.WHITE) end
         if cx then drawWorldArc(0, p, cx, cy, r, D.BLUE) end
+    elseif cx then
+        publishCamera()   -- 벽을 그리는 동안만 (파란 원 활성 + Viewpoint 시점)
     end
     if cx then drawTint(p, cx, cy, r) end
 end

@@ -30,11 +30,16 @@ import viewpoint.api.view.Vec3;
  * Look (0.2.0, 11-19): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks,
  * strong enough to read as a wall from far away (0.1.0 was a faint striped film).
  *
- * Axes: how PZ world tiles (x, y) map to Viewpoint's render space is not documented. It is found at run time:
- * the camera position is read back from the view matrix, then each candidate mapping (x/y swapped or not, depth axis
- * flipped or not, scene origin subtracted or not) is tried against the player position Lua sends (Zone.player).
- * The first one that puts the player within MATCH_TILES of the camera wins and is logged. Height is the Y axis.
- * If none matches, nothing is drawn and the numbers are logged every 5 s.
+ * Axes (0.3.1, 11-19): FrameView.view() is relative to FrameView.sceneOrigin(), and sceneOrigin is in PZ world
+ * coordinates (x tile, y tile, floor level) - run 11-19 logged sceneOrigin=(5209.4,9537.6,0.0) next to
+ * player=(5209.4,9537.6) and a camera 2 units away from the render origin. 0.3.0 subtracted origin.z() (the floor level)
+ * from the world y axis and compared absolute tiles with that origin-relative camera, so no mapping ever matched and
+ * the wall was never drawn. Now: render (x, z) = +-(world x - origin.x), +-(world y - origin.y), height is render y.
+ * The default signs are both negative (the same mapping the PongDu Viewpoint effects use against Viewpoint's frame
+ * matrices, seen working in game). Because the player sits at the origin, position cannot tell the 8 candidates apart,
+ * so the mapping is checked against the camera heading instead: Lua publishes Viewpoint's eye yaw (BlueZone.VP, world
+ * atan2(dy, dx) degrees) and each candidate is scored by how well it turns that heading into the view matrix's forward
+ * axis. After CAL_SAMPLES frames the best one is taken and logged ("axes calibrated"). Without a yaw the default stays.
  */
 public final class BlueZoneWall {
     static final String TAG = "[BlueZone][VP] ";
@@ -45,8 +50,9 @@ public final class BlueZoneWall {
     static final float SHOW_RANGE = 450f;    // draw only when the player is this close to the edge
     static final float BELOW = 60f;          // wall bottom: camera height - BELOW (render units)
     static final float ABOVE = 140f;         // wall top: camera height + ABOVE
-    static final float MATCH_TILES = 14f;    // camera-to-player distance allowed while matching axes (3rd person boom)
-    static final float RECHECK_TILES = 40f;  // re-match axes when the player drifts this far from the camera
+    static final int DEFAULT_MAP = 6;        // render x = -(world dx), render z = -(world dy)
+    static final int CAL_SAMPLES = 40;       // frames of camera heading used to check the axis mapping
+    static final long YAW_MAX_AGE_MS = 150L; // Lua's camera yaw older than this is not used
     static final float[] COLOR = { 0.12f, 0.38f, 1.00f, 0.42f };   // rgb = haze tint, a = base opacity
 
     static final int FLOATS_PER_VERT = 5;    // x y z u v
@@ -109,7 +115,12 @@ public final class BlueZoneWall {
     private boolean firstDrawLogged;
 
     // axis mapping (render thread only)
-    private int mapping = -1;          // bit0 swap x/y, bit1 flip depth, bit2 subtract scene origin
+    private int mapping = DEFAULT_MAP; // bit0 swap world x/y, bit1 negate render x, bit2 negate render z
+    private boolean calibrated, defaultLogged;
+    private final double[] calScore = new double[8];
+    private int calSamples, calRounds, fwdVotes;
+    private double lastFwdDot = Double.NaN;
+    private String lastNdc = "?";
     private long nextDiag;
     private long nextStat;
     private int drawnFrames, skippedFar;
@@ -227,18 +238,31 @@ public final class BlueZoneWall {
                 colMajor ? 1 : 0 };
     }
 
-    /** world tile (wx, wy) -> render (x, z) for a candidate mapping */
+    /** horizontal forward axis of the camera in render space {x, z, length before normalising} (OpenGL: the camera looks down -Z) */
+    static double[] forwardFromView(float[] m, boolean colMajor) {
+        double fx, fz;
+        if (colMajor) { fx = -m[2]; fz = -m[10]; }
+        else          { fx = -m[8]; fz = -m[10]; }
+        double len = Math.hypot(fx, fz);
+        if (len < 1e-6) return new double[] { 0, 0, 0 };
+        return new double[] { fx / len, fz / len, len };
+    }
+
+    /** world offset (dx, dy) in tiles -> render (x, z) for a candidate mapping */
+    static double[] dir(int map, double dx, double dy) {
+        boolean swap = (map & 1) != 0;
+        double a = swap ? dy : dx, b = swap ? dx : dy;
+        return new double[] { (map & 2) != 0 ? -a : a, (map & 4) != 0 ? -b : b };
+    }
+
+    /** world tile (wx, wy) -> render (x, z): relative to the scene origin (world x, world y, floor level) */
     static double[] toRender(int map, double wx, double wy, Vec3 origin) {
-        boolean swap = (map & 1) != 0, flip = (map & 2) != 0, rel = (map & 4) != 0;
-        double sx, sz;
-        if (swap) { sx = wy; sz = flip ? -wx : wx; }
-        else      { sx = wx; sz = flip ? -wy : wy; }
-        if (rel && origin != null) { sx -= origin.x(); sz -= origin.z(); }
-        return new double[] { sx, sz };
+        return dir(map, wx - origin.x(), wy - origin.y());
     }
 
     static String mapName(int map) {
-        return ((map & 1) != 0 ? "swap" : "noswap") + "," + ((map & 2) != 0 ? "flip" : "noflip") + "," + ((map & 4) != 0 ? "origin" : "absolute");
+        boolean swap = (map & 1) != 0;
+        return "x=" + ((map & 2) != 0 ? "-" : "+") + (swap ? "dy" : "dx") + ",z=" + ((map & 4) != 0 ? "-" : "+") + (swap ? "dx" : "dy");
     }
 
     private void diag(String why, double[] cam, FrameView v) {
@@ -248,32 +272,62 @@ public final class BlueZoneWall {
         Vec3 e = v.eye(), o = v.sceneOrigin();
         log("axes " + why + ": camera(view)=(" + f1(cam[0]) + "," + f1(cam[1]) + "," + f1(cam[2]) + ") colMajor=" + (cam[3] > 0)
                 + " eye=" + vec(e) + " sceneOrigin=" + vec(o)
-                + " player=(" + f1(ZoneState.px) + "," + f1(ZoneState.py) + "," + f1(0) + ")");
+                + " player=(" + f1(ZoneState.px) + "," + f1(ZoneState.py) + ") camYaw=" + f1(ZoneState.camYaw)
+                + " yawAgeMs=" + (now - ZoneState.camYawAt));
     }
 
-    private boolean matchAxes(double[] cam, FrameView v) {
-        if (!ZoneState.hasPlayer) { diag("waiting for player position from Lua", cam, v); return false; }
-        double px = ZoneState.px, py = ZoneState.py;
-        if (mapping >= 0) {
-            double[] r = toRender(mapping, px, py, v.sceneOrigin());
-            if (Math.hypot(r[0] - cam[0], r[1] - cam[2]) <= RECHECK_TILES) return true;
-            log("axes drifted (" + mapName(mapping) + "), matching again");
-            mapping = -1;
+    /**
+     * Checks the axis mapping against the camera heading Lua publishes. Every usable frame adds, for each candidate,
+     * the dot product between the view matrix's forward axis and the candidate's image of the world heading.
+     * The forward sign (-Z or +Z) is voted by the third-person camera: it sits behind the player it looks at.
+     */
+    private void calibrate(float[] view, double[] cam, FrameView v) {
+        if (calibrated) return;
+        long now = System.currentTimeMillis();
+        double yaw = ZoneState.camYaw;
+        long age = now - ZoneState.camYawAt;
+        if (Double.isNaN(yaw) || age > YAW_MAX_AGE_MS || age < -1000L) {
+            if (!defaultLogged) {
+                defaultLogged = true;
+                log("axes: using default " + mapName(mapping) + " until Lua sends a camera yaw (BlueZone.VP yaw=" + f1(yaw) + " ageMs=" + age + ")");
+            }
+            return;
         }
-        int best = -1;
-        double bestErr = Double.MAX_VALUE;
+        double[] f = forwardFromView(view, cam[3] > 0);
+        if (f[2] < 0.35) return;                       // looking almost straight down or up: no heading
+        double camFlat = Math.hypot(cam[0], cam[2]);
+        if (camFlat > 1.0) fwdVotes += (f[0] * -cam[0] + f[1] * -cam[2]) >= 0 ? 1 : -1;
+        double c = Math.cos(Math.toRadians(yaw)), s = Math.sin(Math.toRadians(yaw));
         for (int map = 0; map < 8; map++) {
-            double[] r = toRender(map, px, py, v.sceneOrigin());
-            double err = Math.hypot(r[0] - cam[0], r[1] - cam[2]);
-            if (err < bestErr) { bestErr = err; best = map; }
+            double[] d = dir(map, c, s);
+            calScore[map] += d[0] * f[0] + d[1] * f[1];
         }
-        if (bestErr <= MATCH_TILES) {
+        if (++calSamples < CAL_SAMPLES) return;
+        double sign = fwdVotes < 0 ? -1 : 1;           // camera looks down +Z instead of -Z
+        int best = -1, second = -1;
+        for (int map = 0; map < 8; map++) {
+            double sc = calScore[map] * sign;
+            if (best < 0 || sc > calScore[best] * sign) { second = best; best = map; }
+            else if (second < 0 || sc > calScore[second] * sign) second = map;
+        }
+        double bestAvg = calScore[best] * sign / calSamples, secondAvg = calScore[second] * sign / calSamples;
+        StringBuilder all = new StringBuilder();
+        for (int map = 0; map < 8; map++) all.append(' ').append(mapName(map)).append('=').append(f2(calScore[map] * sign / calSamples));
+        calRounds++;
+        if (bestAvg > 0.85 && bestAvg - secondAvg > 0.15) {
+            calibrated = true;
+            log("axes calibrated: " + mapName(best) + " score " + f2(bestAvg) + (best == mapping ? " (same as default)" : " (default " + mapName(mapping) + " was WRONG, switched)")
+                    + " forward=" + (sign > 0 ? "-Z" : "+Z") + " votes=" + fwdVotes + " eye=" + vec(v.eye()) + " scores:" + all);
             mapping = best;
-            log("axes matched: " + mapName(best) + " (camera-to-player " + f1(bestErr) + " tiles)");
-            return true;
+        } else {
+            if (calRounds <= 5 || calRounds % 20 == 0) {
+                log("axes calibration inconclusive (" + calRounds + "), keeping " + mapName(mapping) + ": best " + mapName(best) + " " + f2(bestAvg)
+                        + " second " + mapName(second) + " " + f2(secondAvg) + " forward=" + (sign > 0 ? "-Z" : "+Z") + " votes=" + fwdVotes + " scores:" + all);
+            }
+            java.util.Arrays.fill(calScore, 0);
+            calSamples = 0;
+            fwdVotes = 0;
         }
-        diag("no mapping within " + MATCH_TILES + " tiles (best " + mapName(best) + " " + f1(bestErr) + ")", cam, v);
-        return false;
     }
 
     // ── draw ───────────────────────────────────────────────────
@@ -287,9 +341,11 @@ public final class BlueZoneWall {
             FrameView v = (FrameView) mView.invoke(null, frame);
             float[] view = v.view(), proj = v.projection();
             double[] cam = cameraFromView(view);
-            if (!matchAxes(cam, v)) return;
-            int quads = buildArc(blue, cam, v);
-            stats(quads);
+            if (!ZoneState.hasPlayer || v.sceneOrigin() == null) { diag("waiting (player=" + ZoneState.hasPlayer + ")", cam, v); return; }
+            calibrate(view, cam, v);
+            int quads = buildArc(blue, cam, v, view, proj);
+            lastFwdDot = headingDot(view, cam);
+            stats(quads, blue, cam);
             if (quads == 0) return;
             mBind.invoke(null);
             mBegin.invoke(gpu);
@@ -318,7 +374,7 @@ public final class BlueZoneWall {
                 gpu.draw(program, mesh, Primitive.TRIANGLES, 0, quads * VERTS_PER_QUAD);
                 if (!firstDrawLogged) {
                     firstDrawLogged = true;
-                    log("first wall draw: quads=" + quads + " blue=(" + f1(blue[0]) + "," + f1(blue[1]) + " r" + f1(blue[2])
+                    log("first wall draw: quads=" + quads + " axes=" + mapName(mapping) + " nearestWallNdc=" + lastNdc + " blue=(" + f1(blue[0]) + "," + f1(blue[1]) + " r" + f1(blue[2])
                             + ") gl before: blend=" + blend + " depthTest=" + depthTest + " cull=" + cull + " depthWrite=" + depthWrite);
                 }
             } finally {
@@ -338,7 +394,7 @@ public final class BlueZoneWall {
     }
 
     /** fills verts with the arc of the blue circle facing the player; returns the quad count */
-    private int buildArc(double[] blue, double[] cam, FrameView v) {
+    private int buildArc(double[] blue, double[] cam, FrameView v, float[] view, float[] proj) {
         double cx = blue[0], cy = blue[1], r = blue[2];
         double px = ZoneState.px, py = ZoneState.py;
         double dx = px - cx, dy = py - cy;
@@ -368,7 +424,35 @@ public final class BlueZoneWall {
             u1 = u2;
         }
         // unused tail stays from earlier frames; only quads * 6 vertices are drawn
+        // diagnostics: where the nearest wall point (straight out from the player) lands on screen at camera height
+        double[] near = toRender(mapping, cx + r * Math.cos(phi), cy + r * Math.sin(phi), origin);
+        lastNdc = ndc(view, proj, near[0], cam[1], near[1]);
         return quads;
+    }
+
+    /** clip-space position of a render-space point, "(x,y) w=..": |x|,|y| <= 1 and w > 0 means on screen. Column-major matrices. */
+    static String ndc(float[] view, float[] proj, double x, double y, double z) {
+        double[] e = mul(view, x, y, z, 1), c = mul(proj, e[0], e[1], e[2], e[3]);
+        if (Math.abs(c[3]) < 1e-9) return "w=0";
+        return "(" + f2(c[0] / c[3]) + "," + f2(c[1] / c[3]) + ") w=" + f1(c[3]);
+    }
+
+    static double[] mul(float[] m, double x, double y, double z, double w) {
+        return new double[] {
+                m[0] * x + m[4] * y + m[8] * z + m[12] * w,
+                m[1] * x + m[5] * y + m[9] * z + m[13] * w,
+                m[2] * x + m[6] * y + m[10] * z + m[14] * w,
+                m[3] * x + m[7] * y + m[11] * z + m[15] * w };
+    }
+
+    /** dot between the view's forward axis and the mapped camera yaw from Lua (1 = the mapping agrees with the camera), NaN without a yaw */
+    private double headingDot(float[] view, double[] cam) {
+        double yaw = ZoneState.camYaw;
+        if (Double.isNaN(yaw) || System.currentTimeMillis() - ZoneState.camYawAt > YAW_MAX_AGE_MS) return Double.NaN;
+        double[] f = forwardFromView(view, cam[3] > 0);
+        if (f[2] < 0.35) return Double.NaN;
+        double[] d = dir(mapping, Math.cos(Math.toRadians(yaw)), Math.sin(Math.toRadians(yaw)));
+        return d[0] * f[0] + d[1] * f[1];
     }
 
     private int vert(int k, double[] p, float y, float u, float vv) {
@@ -380,16 +464,23 @@ public final class BlueZoneWall {
         return k + FLOATS_PER_VERT;
     }
 
-    private void stats(int quads) {
+    private void stats(int quads, double[] blue, double[] cam) {
         if (quads > 0) drawnFrames++;
         long now = System.currentTimeMillis();
         if (now < nextStat) return;
-        if (nextStat != 0) log("wall frames drawn=" + drawnFrames + " skipped(far from edge)=" + skippedFar + " last quads=" + quads + " (last 10s)");
+        if (nextStat != 0) {
+            double edge = Math.hypot(ZoneState.px - blue[0], ZoneState.py - blue[1]) - blue[2];
+            log("wall frames drawn=" + drawnFrames + " skipped(far from edge)=" + skippedFar + " last quads=" + quads + " (last 10s)"
+                    + " edgeDist=" + f1(edge) + " axes=" + mapName(mapping) + (calibrated ? "(calibrated)" : "(default)")
+                    + " headingDot=" + f2(lastFwdDot) + " nearestWallNdc=" + lastNdc
+                    + " cam=(" + f1(cam[0]) + "," + f1(cam[1]) + "," + f1(cam[2]) + ")");
+        }
         nextStat = now + 10000L;
         drawnFrames = 0;
         skippedFar = 0;
     }
 
+    static String f2(double d) { return Double.isNaN(d) ? "nan" : String.valueOf(Math.round(d * 100) / 100.0); }
     static String f1(double d) { return String.valueOf(Math.round(d * 10) / 10.0); }
     static String vec(Vec3 p) { return p == null ? "null" : "(" + f1(p.x()) + "," + f1(p.y()) + "," + f1(p.z()) + ")"; }
 }
