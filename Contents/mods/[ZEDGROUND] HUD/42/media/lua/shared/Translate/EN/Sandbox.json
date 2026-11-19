@@ -1,5 +1,5 @@
 {
-  "Sandbox_ZedHUD": "ZEDGROUND HUD",
+  "Sandbox_ZedHUD": "[ZedGround] HUD",
   "Sandbox_ZedHUD_TimerLayout": "Containment zone timer layout",
   "Sandbox_ZedHUD_TimerLayout_tooltip": "Under compass: one line centered under the compass. PUBG style: time and distance-to-next-zone bar above the minimap, plus a center notice when the phase changes.",
   "Sandbox_ZedHUD_TimerLayout_option1": "Under the compass",

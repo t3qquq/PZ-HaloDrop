@@ -1,5 +1,5 @@
 {
-  "Sandbox_BlueZone": "Containment zone (Blue Zone)",
+  "Sandbox_BlueZone": "[ZedGround] Containment zone",
   "Sandbox_BlueZone_Style": "Look",
   "Sandbox_BlueZone_Style_tooltip": "How the zone looks: the wall (Viewpoint 1st/3rd person), the map and minimap colour, the screen tint outside the zone and the HUD timer colour. Damage and timing stay the same.",
   "Sandbox_BlueZone_Style_option1": "Energy field (blue)",

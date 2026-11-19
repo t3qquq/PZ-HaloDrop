@@ -1,5 +1,5 @@
 {
-  "Sandbox_ZedHUD": "ZEDGROUND HUD",
+  "Sandbox_ZedHUD": "[ZedGround] HUD",
   "Sandbox_ZedHUD_TimerLayout": "봉쇄 구역 타이머 배치",
   "Sandbox_ZedHUD_TimerLayout_tooltip": "나침반 아래: 나침반 바로 아래 가운데 한 줄. 배그식: 미니맵 바로 위에 남은 시간과 다음 봉쇄 구역까지 거리 막대, 구간이 바뀔 때 화면 가운데 알림.",
   "Sandbox_ZedHUD_TimerLayout_option1": "나침반 아래",

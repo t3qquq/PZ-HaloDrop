@@ -1,5 +1,5 @@
 {
-  "Sandbox_HaloDrop": "Halo Drop",
+  "Sandbox_HaloDrop": "[ZedGround] HALO Drop",
   "Sandbox_HaloDrop_PlaneSpeed": "Plane speed (tiles/s)",
   "Sandbox_HaloDrop_PlaneSpeed_tooltip": "Virtual flight speed. While aboard the character does not actually move (sky view), only the map scrolls, so any value works. The horizontal speed inherited on jumping has its own cap (JUMP_PLANE_SPEED 12). In the default area (about 20000x16000) 200 means a 1-2 minute crossing.",
   "Sandbox_HaloDrop_WorldX1": "Flight area X1 (west)",

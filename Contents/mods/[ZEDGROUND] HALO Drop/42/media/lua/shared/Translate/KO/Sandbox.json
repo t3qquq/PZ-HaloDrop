@@ -1,5 +1,5 @@
 {
-  "Sandbox_HaloDrop": "Halo Drop (공수강하)",
+  "Sandbox_HaloDrop": "[ZedGround] 공수강하",
   "Sandbox_HaloDrop_PlaneSpeed": "수송기 속도 (타일/초)",
   "Sandbox_HaloDrop_PlaneSpeed_tooltip": "가상 비행 속도. 탑승 중엔 캐릭터가 실제로 움직이지 않고(하늘 뷰) 지도만 흐르므로 얼마든지 올려도 된다. 뛰어내릴 때 이어받는 수평 속도는 별도 상한(JUMP_PLANE_SPEED 12)이 있다. 기본 범위(약 20000x16000)에서 200이면 한 바퀴 1~2분.",
   "Sandbox_HaloDrop_WorldX1": "비행 범위 X1 (서쪽)",

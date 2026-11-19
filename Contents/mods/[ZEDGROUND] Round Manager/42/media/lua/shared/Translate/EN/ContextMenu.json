@@ -1,7 +1,7 @@
 {
   "ContextMenu_RoundManager": "ZEDGROUND control",
   "ContextMenu_RoundManager_ModOff": "This mod is not enabled on the server.",
-  "ContextMenu_RoundManager_HaloDrop": "Air drop",
+  "ContextMenu_RoundManager_HaloDrop": "HALO Drop",
   "ContextMenu_RoundManager_HaloDrop_Start": "Start drop (route prep)",
   "ContextMenu_RoundManager_HaloDrop_Launch": "Skip route prep and launch",
   "ContextMenu_RoundManager_HaloDrop_Stop": "End drop",
