@@ -62,15 +62,18 @@ end
 --   1 field: 배그식 전자기장 (파랑, 번개 줄기)   2 gas: 화생방 오염 구역 (초록 독가스)
 -- 색만 여기서 정한다. Viewpoint 벽 모양은 클라 자바(src/t3bluezone/BlueZoneWall)가 같은 샌드박스 값을 읽어 고른다.
 --   line   : 지도·미니맵 원 선, 아이소 땅 위 선      fill: 지도·미니맵 원 바깥 채우기
---   tint   : 구역 밖 화면 색                          hud / hudFill: HUD 타이머 글자 / 진행 막대 (ZEDGROUND HUD 가 읽는다)
+--   tint   : 구역 밖 화면 색. minA ~ maxA = 경계에서 TINT_DEPTH 타일 밖까지의 진하기 (BlueZoneDisplay.lua)
+--            가스는 색·진하기를 전자기장과 따로 잡는다: 11-19 Gas 런에서 전자기장과 같은 진하기(0.12~0.40)로 덮었더니
+--            색(0.28,0.55,0.08)이 풀밭 색과 거의 같아 덮여도 화면이 안 변했다 -> 더 어둡고 짙은 초록 + 높은 진하기
+--   hud / hudFill: HUD 타이머 글자 / 진행 막대 (ZEDGROUND HUD 가 읽는다)
 BlueZone.STYLES = {
     { name = "field",
       line = { r = 0.25, g = 0.50, b = 1.00, a = 0.95 }, fill = { r = 0.10, g = 0.25, b = 0.90, a = 0.35 },
-      tint = { r = 0.10, g = 0.25, b = 0.85 },
+      tint = { r = 0.10, g = 0.25, b = 0.85, minA = 0.12, maxA = 0.40 },
       hud  = { r = 0.45, g = 0.70, b = 1.00 }, hudFill = { r = 0.25, g = 0.50, b = 1.00, a = 0.95 } },
     { name = "gas",
       line = { r = 0.45, g = 0.95, b = 0.25, a = 0.95 }, fill = { r = 0.22, g = 0.55, b = 0.08, a = 0.38 },
-      tint = { r = 0.28, g = 0.55, b = 0.08 },
+      tint = { r = 0.04, g = 0.36, b = 0.02, minA = 0.28, maxA = 0.50 },
       hud  = { r = 0.62, g = 0.95, b = 0.40 }, hudFill = { r = 0.40, g = 0.85, b = 0.20, a = 0.95 } },
 }
 

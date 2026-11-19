@@ -29,9 +29,7 @@ local D = {
     MAP_THICK    = 2,
     -- 지도·미니맵에서 파란 원 바깥 전체를 덮는다 (배그 지도처럼 원 밖을 통째로 칠한다). 색은 BlueZone.style().fill
     MAP_FILL_SEGMENTS = 128,
-    -- 틴트: 경계 밖 깊이(타일)에 비례해 MIN_A ~ MAX_A. 색은 BlueZone.style().tint
-    TINT_MIN_A = 0.12,
-    TINT_MAX_A = 0.40,
+    -- 틴트: 경계 밖 깊이(타일)에 비례해 tint.minA ~ tint.maxA. 색·진하기는 연출별 BlueZone.style().tint
     TINT_DEPTH = 60,
     VP_CACHE_MS = 250,        -- Viewpoint 시점 판정 캐시 (자바 호출)
 }
@@ -137,8 +135,8 @@ local function drawTint(p, cx, cy, r)
     local depth = math.sqrt(dx * dx + dy * dy) - r
     local k = depth / D.TINT_DEPTH
     if k > 1 then k = 1 end
-    local a = D.TINT_MIN_A + (D.TINT_MAX_A - D.TINT_MIN_A) * k
     local t = style().tint
+    local a = t.minA + (t.maxA - t.minA) * k
     getRenderer():renderi(nil, 0, 0, getCore():getScreenWidth(), getCore():getScreenHeight(), t.r, t.g, t.b, a, nil)
 end
 
