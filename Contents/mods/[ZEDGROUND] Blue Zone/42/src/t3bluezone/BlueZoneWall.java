@@ -31,6 +31,9 @@ import static org.lwjgl.opengl.GL33.*;
  * 32-bit floats stay exact for circles thousands of tiles wide.
  * Look: sandbox BlueZone.Style (read by ZoneState, the server's value reaches every client).
  *   1 field (0.2.0): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
+ *   2 gas (0.7.2): bright artificial green that drifts through GAS_PALETTE (same clock and order as Lua
+ *     BlueZone.gasColor, so the wall, the screen tint and the map fill change together). Run 11-19 green gas: the dark
+ *     olive gas read as murky and close to the foliage.
  *   2 gas (0.7.1): one thin curtain right on the circle (EDGE_*), so the line between safe and gassed ground reads at a
  *     glance (run 11-19 17:54: puffs and shells spilled a few tiles inside and blurred where the zone ends). The gas
  *     itself now starts at the line instead of up to ~9 tiles inside it.
@@ -61,7 +64,18 @@ public final class BlueZoneWall {
     static final int CAL_SAMPLES = 40;       // frames of camera heading used to check the axis mapping
     static final long YAW_MAX_AGE_MS = 150L; // Lua's camera yaw older than this is not used
     static final float[] COLOR = { 0.12f, 0.38f, 1.00f, 0.42f };   // field: rgb = haze tint, a = base opacity
-    static final float[] GAS_COLOR = { 0.56f, 0.74f, 0.20f, 0.16f }; // gas: rgb = lit part of the cloud, a = absorption per tile of full density
+    static final float[] GAS_COLOR = { 0.40f, 1.00f, 0.16f, 0.16f }; // gas: rgb = start colour (replaced every frame by GAS_PALETTE), a = absorption per tile of full density
+    // Gas colour cycle (0.7.2). Must match BlueZone.GAS_PALETTE / GAS_CYCLE_MS in BlueZoneConfig.lua: ping-pong through the
+    // list on the wall clock (System.currentTimeMillis = Lua getTimestampMs), smoothstep between neighbours.
+    static final float[][] GAS_PALETTE = {
+            { 0.62f, 1.00f, 0.05f },   // acid
+            { 0.40f, 1.00f, 0.16f },   // lime
+            { 0.22f, 1.00f, 0.38f },   // radioactive
+            { 0.10f, 1.00f, 0.55f },   // neon mint
+    };
+    static final long GAS_CYCLE_MS = 24000L;
+    private final float[] gasNow = new float[3];
+    private final float[] gasCol4 = new float[4];
     static final int GAS_LAYERS = 8;         // shells; GAS_LAYERS * GAS_GAP = how deep the gas bank is (tiles)
     static final float GAS_GAP = 5f;         // tiles between gas shells (outward from the circle)
     static final float GAS_TALL = 28f;       // cloud height above the ground (render units); the rolling top reaches 1.45x
@@ -76,6 +90,9 @@ public final class BlueZoneWall {
     static final float PUFF_ALPHA = 0.86f;   // one puff's peak opacity (overlap makes it solid), as in PongDu
     static final float PUFF_INSIDE_THIN = 0.65f;   // camera in the gas: puffs keep 35% so the view is a haze (the Lua tint does the rest)
     static final int MAX_PUFFS = 1400;
+    static final float PUFF_BOB = 1.2f;      // 0.7.2: up-down roll (render units), period about 7 s
+    static final float PUFF_SWAY = 1.8f;     // 0.7.2: sideways sway along the wind (tiles), period about 11 s
+    static final float PUFF_SWELL = 0.10f;   // 0.7.2: size breathing (fraction), period about 9 s
     // Distance fade, both styles (0.6.1). Viewpoint hazes far terrain and trees toward the sky colour, the wall was drawn
     // at full strength: on video (run 11-19 Gas, 9:46) far forest in front of the wall hid its foot and looked like sky,
     // so the wall seemed to float, and its far end was cut by a straight vertical edge (far plane 400 / ARC_HALF).
@@ -156,13 +173,13 @@ public final class BlueZoneWall {
             "    if (haze <= 0.0) discard;\n" +
             "    if (uStyle > 2.5) {\n" + // gas edge curtain (0.7.1): no ground fade, so it draws the line where it meets the ground
             "        float hgt = vW.z - uGas.w;\n" +
-            "        float topH = uGas.z * (0.55 + 0.50 * noise(vec2(u * 0.035 + uTime * 0.06, 3.7)));\n" +
+            "        float topH = uGas.z * (0.55 + 0.50 * noise(vec2(u * 0.035 + uTime * 0.20, 3.7 + uTime * 0.10)));\n" + // 0.7.2: top billows 3x faster
             "        float vf = 1.0 - smoothstep(topH * 0.30, topH, hgt);\n" +
             "        if (vf <= 0.0) discard;\n" +
-            "        float n = noise(vec2(u * 0.09 - uTime * 0.16, hgt * 0.11 - uTime * 0.05)) * 0.6\n" +
-            "                + noise(vec2(u * 0.27 + uTime * 0.35, hgt * 0.33 + uTime * 0.10)) * 0.4;\n" +
+            "        float n = noise(vec2(u * 0.09 - uTime * 0.40, hgt * 0.11 - uTime * 0.30)) * 0.6\n" + // 0.7.2: faster sideways drift and rising swirl
+            "                + noise(vec2(u * 0.27 + uTime * 0.90, hgt * 0.33 - uTime * 0.60)) * 0.4;\n" +
             "        float lit = clamp(hgt / max(topH, 0.01), 0.0, 1.0) * (0.45 + 0.55 * n);\n" +
-            "        vec3 c = mix(uColor.rgb * vec3(0.30, 0.42, 0.42), uColor.rgb * 1.10 + vec3(0.12, 0.10, 0.02), lit);\n" +
+            "        vec3 c = mix(uColor.rgb * 0.62, uColor.rgb * 1.05 + vec3(0.10), lit);\n" + // 0.7.2: brighter base (was rgb * 0.30-0.42)
             "        fragColor = vec4(c, clamp(uColor.a * (0.60 + 0.55 * n) * vf, 0.0, 0.85) * haze);\n" +
             "        return;\n" +
             "    }\n" +
@@ -179,20 +196,20 @@ public final class BlueZoneWall {
             "        float hgt = q.z - ground;\n" +
             "        if (hgt > tall * 1.5) discard;\n" +
             "        vec3 P = vec3(q.xy + uOrg.xy, q.z);\n" +
-            "        vec3 wind = vec3(0.50, 0.31, 0.0) * uTime;\n" +
-            "        float top = tall * (0.50 + 0.95 * noise(P.xy * 0.030 + wind.xy * 0.030));\n" + // rolling cloud top
+            "        vec3 wind = vec3(2.00, 1.24, 0.0) * uTime;\n" + // 0.7.2: 4x faster drift (about 2.4 tiles/s, was 0.6 and read as still)
+            "        float top = tall * (0.50 + 0.95 * noise(P.xy * 0.030 + wind.xy * 0.030 + vec2(uTime * 0.05, 0.0)));\n" + // rolling cloud top
             "        float hf = 1.0 - smoothstep(top * 0.25, top, hgt);\n" +
             "        if (hf <= 0.0) discard;\n" +
-            "        float n = noise3(P * vec3(0.060, 0.060, 0.100) + wind * 0.060 + vec3(0.0, 0.0, uTime * 0.020)) * 0.55\n" +
-            "                + noise3(P * vec3(0.150, 0.150, 0.230) + wind * 0.150 + vec3(7.3, 1.9, -uTime * 0.050)) * 0.30\n" +
-            "                + noise3(P * vec3(0.410, 0.410, 0.560) + wind * 0.410 + vec3(3.1, 5.7, -uTime * 0.110)) * 0.15;\n" +
+            "        float n = noise3(P * vec3(0.060, 0.060, 0.100) + wind * 0.060 + vec3(0.0, 0.0, uTime * 0.070)) * 0.55\n" + // 0.7.2: churn 3.5x faster
+            "                + noise3(P * vec3(0.150, 0.150, 0.230) + wind * 0.150 + vec3(7.3, 1.9, -uTime * 0.180)) * 0.30\n" +
+            "                + noise3(P * vec3(0.410, 0.410, 0.560) + wind * 0.410 + vec3(3.1, 5.7, -uTime * 0.400)) * 0.15;\n" +
             "        float front = smoothstep(0.0, 6.0, s + (n - 0.5) * 6.0);\n" + // billowing edge, starts at most ~3 tiles inside the circle (0.7.1, was ~9)
             "        float back = 1.0 - smoothstep(thick * 0.70, thick, s);\n" + // thins out at the far side of the slab
             "        float puff = clamp((n - 0.32) * 2.9, 0.0, 1.0);\n" +
             "        float dens = (0.10 + 1.70 * puff * puff) * hf * front * back;\n" +
             "        float a = (1.0 - exp(-uColor.a * dens * len)) * smoothstep(-0.3, 1.4, vW.z - ground);\n" + // absorption along the slice; fades at the ground so shells leave no lines on it
             "        float lit = clamp(0.15 + 0.85 * hgt / max(top, 0.01), 0.0, 1.0) * (0.35 + 0.65 * puff);\n" +
-            "        vec3 c = mix(uColor.rgb * vec3(0.20, 0.30, 0.34), uColor.rgb * 1.10 + vec3(0.16, 0.13, 0.02), lit);\n" +
+            "        vec3 c = mix(uColor.rgb * 0.55, uColor.rgb * 1.05 + vec3(0.12), lit);\n" + // 0.7.2: brighter base (was rgb * 0.20-0.34)
             "        float farOnly = smoothstep(uCam.w * 0.60, uCam.w * 0.95, length(vW - uCam.xyz));\n" +
             "        fragColor = vec4(c, clamp(a, 0.0, 0.92) * haze * farOnly);\n" +
             "        return;\n" +
@@ -259,14 +276,14 @@ public final class BlueZoneWall {
             "void main() {\n" +
             "    float seed = uMisc.x; float time = uMisc.y; float floorY = uMisc.z;\n" +
             "    vec2 c = uv * 2.0 - 1.0;\n" +
-            "    float ang = seed * 6.2831853;\n" +
+            "    float ang = seed * 6.2831853 + time * (0.18 + 0.20 * seed) * (seed > 0.5 ? 1.0 : -1.0);\n" + // 0.7.2: puffs slowly turn
             "    vec2 rc = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * c;\n" +
-            "    float n = fbm(rc * 1.7 + vec2(seed * 13.0, seed * 7.0) + vec2(time * 0.05, -time * 0.035));\n" +
+            "    float n = fbm(rc * 1.7 + vec2(seed * 13.0, seed * 7.0) + vec2(time * 0.22, -time * 0.16));\n" + // 0.7.2: churn 4x faster
             "    float shape = 1.0 - smoothstep(0.38, 1.0, length(c) + (n - 0.5) * 0.7);\n" +
             "    float al = shape * uTint.a * nearK * smoothstep(floorY, floorY + 1.4, vY);\n" + // fades into the ground instead of a straight cut
             "    if (al < 0.003) discard;\n" +
             "    float lit = 0.50 + 0.62 * clamp(0.5 + c.y * 0.6 + (n - 0.5) * 0.7, 0.0, 1.0);\n" +
-            "    vec3 col = mix(uTint.rgb * vec3(0.55, 0.70, 0.75), uTint.rgb + vec3(0.10, 0.08, 0.0), clamp(lit - 0.45, 0.0, 1.0) * 1.5);\n" +
+            "    vec3 col = mix(uTint.rgb * 0.75, uTint.rgb + vec3(0.10), clamp(lit - 0.45, 0.0, 1.0) * 1.5);\n" + // 0.7.2: brighter base (was rgb * 0.55-0.75)
             "    color = vec4(col * lit * uMisc.w * al, al);\n" +
             "}\n";
 
@@ -614,13 +631,15 @@ public final class BlueZoneWall {
                 } else {
                     glUniform4f(uY, (float) (cam[1] - BELOW), (float) (cam[1] + ABOVE), 0f, 0f);
                 }
-                float[] col = gas ? GAS_COLOR : COLOR;
+                if (gas) gasColorNow();
+                float[] col = COLOR;
+                if (gas) { gasCol4[0] = gasNow[0]; gasCol4[1] = gasNow[1]; gasCol4[2] = gasNow[2]; gasCol4[3] = GAS_COLOR[3]; col = gasCol4; }
                 glUniform4f(uColor, col[0], col[1], col[2], col[3]);
                 glUniform1f(uTime, (float) (v.seconds() % 1000.0));
                 glUniform1f(uStyle, gas ? 2f : 1f);
                 if (style != lastStyle) {
                     lastStyle = style;
-                    log("wall style " + style + (gas ? " (gas, edge curtain a=" + EDGE_ALPHA + " " + EDGE_TALL + " high, " + GAS_LAYERS + " shells " + GAS_GAP + " tiles apart, cloud " + GAS_TALL + " high, camera "
+                    log("wall style " + style + (gas ? " (gas, colour cycle " + GAS_PALETTE.length + " colours / " + GAS_CYCLE_MS + "ms, edge curtain a=" + EDGE_ALPHA + " " + EDGE_TALL + " high, " + GAS_LAYERS + " shells " + GAS_GAP + " tiles apart, cloud " + GAS_TALL + " high, camera "
                             + f1(camS) + " tiles outside the edge, puffs within " + PUFF_RANGE + " tiles)" : " (field)") + " fade " + FADE_NEAR + "-" + FADE_FAR + " tiles");
                 }
 
@@ -683,6 +702,17 @@ public final class BlueZoneWall {
         }
     }
 
+    /** Gas colour of this frame into gasNow (0.7.2): ping-pong through GAS_PALETTE, same formula as Lua BlueZone.gasColor. */
+    private void gasColorNow() {
+        double k = (System.currentTimeMillis() % GAS_CYCLE_MS) / (double) GAS_CYCLE_MS;
+        double p = k < 0.5 ? k * 2.0 : (1.0 - k) * 2.0;
+        double x = p * (GAS_PALETTE.length - 1);
+        int i = Math.min((int) Math.floor(x), GAS_PALETTE.length - 2);
+        double f = x - i;
+        f = f * f * (3.0 - 2.0 * f);
+        for (int c = 0; c < 3; c++) gasNow[c] = (float) (GAS_PALETTE[i][c] + (GAS_PALETTE[i + 1][c] - GAS_PALETTE[i][c]) * f);
+    }
+
     /**
      * Gas edge curtain (0.7.1): the arc once more at the circle (uOff 0) with the curtain branch of FS. Called with the
      * wall program bound and its blend set; puts back the gas uniforms it changes so the shells can follow.
@@ -691,11 +721,11 @@ public final class BlueZoneWall {
         glUniform1f(uStyle, 3f);
         glUniform1f(uOff, 0f);
         glUniform1f(uSeed, -1f);
-        glUniform4f(uColor, GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], EDGE_ALPHA);
+        glUniform4f(uColor, gasNow[0], gasNow[1], gasNow[2], EDGE_ALPHA);
         glUniform4f(uGas, GAS_GAP, GAS_GAP * GAS_LAYERS, EDGE_TALL, GAS_GROUND);
         glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
         glUniform1f(uStyle, 2f);
-        glUniform4f(uColor, GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], GAS_COLOR[3]);
+        glUniform4f(uColor, gasNow[0], gasNow[1], gasNow[2], GAS_COLOR[3]);
         glUniform4f(uGas, GAS_GAP, GAS_GAP * GAS_LAYERS, GAS_TALL, GAS_GROUND);
     }
 
@@ -723,6 +753,7 @@ public final class BlueZoneWall {
         int c0x = (int) Math.floor((camWX - PUFF_RANGE) / PUFF_CELL), c1x = (int) Math.floor((camWX + PUFF_RANGE) / PUFF_CELL);
         int c0y = (int) Math.floor((camWY - PUFF_RANGE) / PUFF_CELL), c1y = (int) Math.floor((camWY + PUFF_RANGE) / PUFF_CELL);
         float thin = 1f - PUFF_INSIDE_THIN * clamp01(camS / 8.0);
+        float windRx = (float) (mm[0] * 0.85 + mm[1] * 0.53), windRz = (float) (mm[2] * 0.85 + mm[3] * 0.53);   // world wind (0.85, 0.53), as in FS
         int n = 0;
         for (int gx = c0x; gx <= c1x && n < MAX_PUFFS - 3; gx++) {
             for (int gy = c0y; gy <= c1y && n < MAX_PUFFS - 3; gy++) {
@@ -744,11 +775,16 @@ public final class BlueZoneWall {
                     if (layer == 0) { size = 10f + 3.5f * ih(gx, gy, 4); cy = size * (0.32f + 0.06f * ih(gx, gy, 3)); }   // lower edge reaches the ground
                     else if (layer == 1) { size = 8.5f + 3f * ih(gx, gy, 6); cy = 8f + 3f * ih(gx, gy, 7); }
                     else { size = 9f + 4f * ih(gx, gy, 9); cy = 15f + 5f * ih(gx, gy, 10); }
-                    float ry = GAS_GROUND + cy + 0.5f * (float) Math.sin(time * 0.25 + ih(gx, gy, 30 + layer) * 6.2831853);
-                    double ex = rx - cam[0], ey = ry - cam[1], ez = rz - cam[2];
+                    // 0.7.2: puffs roll - bob up and down, sway sideways and swell (was a 0.5 bob over 25 s, read as still)
+                    float ph = ih(gx, gy, 30 + layer) * 6.2831853f;
+                    float ry = GAS_GROUND + cy + PUFF_BOB * (float) Math.sin(time * 0.9 + ph);
+                    size *= 1f + PUFF_SWELL * (float) Math.sin(time * 0.7 + ph * 1.7);
+                    float sway = PUFF_SWAY * (float) Math.sin(time * 0.55 + ph * 2.3);
+                    float px = rx + sway * windRx, pz = rz + sway * windRz;                 // sway along the wind (same direction as the shell drift)
+                    double ex = px - cam[0], ey = ry - cam[1], ez = pz - cam[2];
                     float dist = (float) Math.sqrt(ex * ex + ey * ey + ez * ez);
                     int o = n * 6;
-                    puffData[o] = rx; puffData[o + 1] = ry; puffData[o + 2] = rz; puffData[o + 3] = size;
+                    puffData[o] = px; puffData[o + 1] = ry; puffData[o + 2] = pz; puffData[o + 3] = size;
                     puffData[o + 4] = a0 * (layer == 0 ? 1f : 0.9f); puffData[o + 5] = ih(gx, gy, 40 + layer);
                     puffKeys[n] = ((long) Float.floatToIntBits(dist) << 32) | n;      // positive floats sort like their bits
                     n++;
@@ -767,7 +803,7 @@ public final class BlueZoneWall {
         for (int i = n - 1; i >= 0; i--) {                                              // far to near
             int o = (int) (puffKeys[i] & 0xffffffffL) * 6;
             glUniform4f(pPos, puffData[o], puffData[o + 1], puffData[o + 2], puffData[o + 3]);
-            glUniform4f(pTint, GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], puffData[o + 4]);
+            glUniform4f(pTint, gasNow[0], gasNow[1], gasNow[2], puffData[o + 4]);
             glUniform4f(pMisc, puffData[o + 5], time, GAS_GROUND, 1f);
             glDrawArrays(GL_TRIANGLES, 0, 6);
         }

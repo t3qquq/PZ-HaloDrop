@@ -67,20 +67,52 @@ end
 --            가스는 색·진하기를 전자기장과 따로 잡는다: 11-19 Gas 런에서 전자기장과 같은 진하기(0.12~0.40)로 덮었더니
 --            색(0.28,0.55,0.08)이 풀밭 색과 거의 같아 덮여도 화면이 안 변했다 -> 더 어둡고 짙은 초록 + 높은 진하기
 --            11-19 저녁: 0.28~0.50 도 옅다는 판정(t3) -> 0.42~0.65
+--            11-19 밤: 어두운 초록이 탁하고 숲과 비슷하다는 판정(t3) -> 밝은 인공 형광 초록 4색이 시간에 따라 바뀐다
+--            (BlueZone.GAS_PALETTE). 색이 밝아진 만큼 진하기는 0.32~0.52 로 낮춤. cycle = true 인 연출만 해당
 --   hud / hudFill: HUD 타이머 글자 / 진행 막대 (ZEDGROUND HUD 가 읽는다)
 BlueZone.STYLES = {
     { name = "field",
       line = { r = 0.25, g = 0.50, b = 1.00, a = 0.95 }, fill = { r = 0.10, g = 0.25, b = 0.90, a = 0.35 },
       tint = { r = 0.10, g = 0.25, b = 0.85, minA = 0.12, maxA = 0.40 },
       hud  = { r = 0.45, g = 0.70, b = 1.00 }, hudFill = { r = 0.25, g = 0.50, b = 1.00, a = 0.95 } },
-    { name = "gas",
-      line = { r = 0.45, g = 0.95, b = 0.25, a = 0.95 }, fill = { r = 0.22, g = 0.55, b = 0.08, a = 0.38 },
-      tint = { r = 0.04, g = 0.36, b = 0.02, minA = 0.42, maxA = 0.65 },
+    { name = "gas", cycle = true,   -- line·fill·tint 의 r,g,b 는 BlueZone.style() 이 GAS_PALETTE 로 매번 덮어쓴다
+      line = { r = 0.40, g = 1.00, b = 0.16, a = 0.95 }, fill = { r = 0.40, g = 1.00, b = 0.16, a = 0.38 },
+      tint = { r = 0.40, g = 1.00, b = 0.16, minA = 0.32, maxA = 0.52 },
       hud  = { r = 0.62, g = 0.95, b = 0.40 }, hudFill = { r = 0.40, g = 0.85, b = 0.20, a = 0.95 } },
 }
 
+-- 독가스 색 순환 (11-19 밤). 클라 자바 벽(BlueZoneWall.GAS_PALETTE / GAS_CYCLE_MS)과 같은 목록·같은 시계(벽시계 ms)·같은 식이라
+-- 벽, 화면 색, 지도 채우기가 함께 바뀐다. 목록을 왕복(산성 -> 라임 -> 방사능 -> 네온 민트 -> ... -> 산성)하고 이웃 사이는 부드럽게 섞는다.
+BlueZone.GAS_PALETTE = {
+    { 0.62, 1.00, 0.05 },   -- 산성
+    { 0.40, 1.00, 0.16 },   -- 라임
+    { 0.22, 1.00, 0.38 },   -- 방사능
+    { 0.10, 1.00, 0.55 },   -- 네온 민트
+}
+BlueZone.GAS_CYCLE_MS = 24000
+
+function BlueZone.gasColor(ms)
+    local P, C = BlueZone.GAS_PALETTE, BlueZone.GAS_CYCLE_MS
+    local k = (ms - math.floor(ms / C) * C) / C
+    local p = k < 0.5 and k * 2 or (1 - k) * 2
+    local x = p * (#P - 1)
+    local i = math.floor(x)
+    if i > #P - 2 then i = #P - 2 end
+    local f = x - i
+    f = f * f * (3 - 2 * f)
+    local a, b = P[i + 1], P[i + 2]
+    return a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f, a[3] + (b[3] - a[3]) * f
+end
+
 function BlueZone.style()
-    return BlueZone.STYLES[BlueZone.opt("Style")]
+    local s = BlueZone.STYLES[BlueZone.opt("Style")]
+    if s.cycle then
+        local r, g, b = BlueZone.gasColor(getTimestampMs())
+        s.line.r, s.line.g, s.line.b = r, g, b
+        s.fill.r, s.fill.g, s.fill.b = r, g, b
+        s.tint.r, s.tint.g, s.tint.b = r, g, b
+    end
+    return s
 end
 
 -- 초 -> ms. kind: "wait"(지연·대기, WaitScale) / "shrink"(축소, ShrinkScale)
