@@ -17,7 +17,40 @@ ZedHUD.COMPASS = {
     tickDeg     = 5,     -- 작은 눈금 간격
     labelDeg    = 15,    -- 숫자 간격
     fadeFrac    = 0.15,  -- 양 끝 이 비율만큼 글자가 흐려진다
+    bgAlpha     = 0.30,  -- 바 바탕 검정의 불투명도
+    barGap      = 2,     -- 접힌 인벤토리·루팅 창 제목 줄 아래로 내릴 때 그 줄과의 간격 px
 }
+
+-- 자기장 타이머 (나침반 바로 아래 가운데, 배그처럼 구간과 남은 시간). Blue Zone 모드가 켜져 있고 라운드 중일 때만 보인다
+--   대기(wait): "N단계 · 축소까지 mm:ss"   축소(shrink): "N단계 · 축소 중 mm:ss"   끝(done): 마지막 문구
+ZedHUD.ZONE = {
+    width   = 300,   -- px
+    height  = 22,    -- px
+    gap     = 4,     -- 나침반 아래 간격 px
+    bgAlpha = 0.30,
+    wait    = { r = 1.00, g = 1.00, b = 1.00 },   -- 대기: 흰색
+    shrink  = { r = 0.45, g = 0.70, b = 1.00 },   -- 축소 중: 파란색
+}
+
+-- 나침반 y. 바닐라 인벤토리·루팅 창은 접혀 있어도 제목 줄이 화면 맨 위에 남아 나침반(화살표)을 덮는다 (11-19 t3).
+-- 창 위에 덧그리지 않고, 나침반과 가로로 겹치는 제목 줄이 있으면 그 줄 바로 아래로 내린다.
+-- 창을 펼친 동안에도 같은 자리(제목 줄 아래)에 있고, 펼친 창이 나침반을 덮는 건 그대로 둔다.
+function ZedHUD.compassTop(x, w)
+    local c = ZedHUD.COMPASS
+    local top = c.top
+    local pages = { getPlayerInventory(0), getPlayerLoot(0) }
+    for i = 1, 2 do
+        local pg = pages[i]
+        if pg and pg:isVisible() then
+            local px, py = pg:getX(), pg:getY()
+            local bottom = py + pg:titleBarHeight()
+            if px < x + w and px + pg:getWidth() > x and py < c.top + c.height and bottom + c.barGap > top then
+                top = bottom + c.barGap
+            end
+        end
+    end
+    return top
+end
 
 function ZedHUD.compassWidth()
     local c = ZedHUD.COMPASS

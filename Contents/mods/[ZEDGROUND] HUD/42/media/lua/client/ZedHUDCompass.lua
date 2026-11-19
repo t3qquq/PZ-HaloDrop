@@ -30,7 +30,7 @@ function ZedHUDCompass:recenter()
     local w = ZedHUD.compassWidth()
     self:setWidth(w)
     self:setX((getCore():getScreenWidth() - w) / 2)
-    self:setY(c.top)
+    self.lastTop = nil   -- 다음 render 에서 y 를 다시 잡는다
 end
 
 -- 가운데 화살표: 아래로 좁아지는 사각형 줄로 그린 삼각형
@@ -47,6 +47,13 @@ function ZedHUDCompass:render()
 
     local c = ZedHUD.COMPASS
     local w, h = self.width, self.height
+    -- 접힌 인벤토리·루팅 창 제목 줄에 가리지 않게 y 를 맞춘다 (ZedHUD.compassTop)
+    local wantY = ZedHUD.compassTop(self:getX(), w)
+    if wantY ~= self.lastTop then
+        self.lastTop = wantY
+        self:setY(wantY)
+        ZedHUD.log("compass: top -> " .. tostring(wantY) .. " (default " .. tostring(c.top) .. ")")
+    end
     local cx = math.floor(w / 2)
     local pxPerDeg = w / c.spanDeg
     local heading, src = ZedHUD.headingOf(p)
@@ -58,7 +65,7 @@ function ZedHUDCompass:render()
     local barTop = c.arrowH + 1
     local barH = h - barTop
 
-    self:drawRect(0, barTop, w, barH, 0.30, 0, 0, 0)
+    self:drawRect(0, barTop, w, barH, c.bgAlpha, 0, 0, 0)
     drawArrow(self, cx, c.arrowH)
 
     local fadePx = w * c.fadeFrac

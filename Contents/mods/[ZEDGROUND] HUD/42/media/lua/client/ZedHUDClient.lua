@@ -2,8 +2,10 @@
 -- 나침반 생성 + 다른 ZEDGROUND 모드 값 조회 (없으면 nil)
 require "ZedHUDConfig"
 require "ZedHUDCompass"
+require "ZedHUDZone"
 
 ZedHUD.compass = nil
+ZedHUD.zone = nil
 
 -- 생존자 수: Round Manager 가 RoundManager.aliveCount() 를 열면 읽는다 (아직 미구현)
 function ZedHUD.sourceAlive()
@@ -21,24 +23,44 @@ function ZedHUD.sourceZoneRemainMs()
     return nil
 end
 
+-- 자기장 구간: 페이즈 번호, 구간("wait" | "shrink" | "done"), 일시정지 여부. 라운드가 없거나 Blue Zone 이 없으면 nil
+function ZedHUD.sourceZoneState()
+    local C = BlueZone and BlueZone.C
+    if not C then return nil end
+    return C.phase, C.seg, C.paused
+end
+
 local function createCompass()
     if ZedHUD.compass then return end
     local c = ZedHUDCompass:new(0)
     c:initialise()
     c:addToUIManager()
+    -- 창 위에 덧그리지 않는다. 접힌 인벤토리·루팅 창 제목 줄은 y 를 내려서 피한다 (ZedHUD.compassTop)
     c:setAlwaysOnTop(false)
     ZedHUD.compass = c
     ZedHUD.log("compass created w=" .. tostring(ZedHUD.compassWidth()) .. " h=" .. tostring(ZedHUD.COMPASS.height))
 end
 
+local function createZone()
+    if ZedHUD.zone then return end
+    local z = ZedHUDZone:new(0)
+    z:initialise()
+    z:addToUIManager()
+    z:setAlwaysOnTop(false)
+    ZedHUD.zone = z
+    ZedHUD.log("zone timer created (under the compass)")
+end
+
 local function onGameStart()
     createCompass()
+    createZone()
     ZedHUD.log("sources: RoundManager=" .. tostring(RoundManager ~= nil)
         .. " BlueZone=" .. tostring(BlueZone ~= nil))
 end
 
 local function onResolutionChange()
     if ZedHUD.compass then ZedHUD.compass:recenter() end
+    if ZedHUD.zone then ZedHUD.zone:recenter() end
 end
 
 Events.OnGameStart.Add(onGameStart)
