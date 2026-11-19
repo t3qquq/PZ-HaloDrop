@@ -5,8 +5,10 @@
 --   segStart, segDur (ms), pausedAt (ms, 일시정지 중일 때만)
 --   from = { x, y, r }  구간 시작 시점의 파란 원 (wait/delay/done 에서는 그대로 현재 파란 원)
 --   white = { x, y, r } 이번 페이즈 목표. done 에서는 nil
--- 시작 파란 원 = 페이즈 1 흰 원과 같은 중심, 반지름 x START_RADIUS_MUL. 페이즈 1 대기 동안은 비활성(BlueZone.blueActive)이라
---   데미지가 없고, 페이즈 1 축소가 시작되면 그 원에서 줄어들기 시작한다. 그때 밖에 있는 사람은 그때부터 데미지
+-- 시작 파란 원 = 페이즈 1 흰 원과 같은 중심, 영역(Area)에서 가장 먼 모서리까지 닿는 반지름 (배그식: 처음엔 영역 전체가 안쪽).
+--   페이즈 1 축소가 시작되면 그 원이 영역 가장자리부터 흰 원으로 줄어든다. 벽은 사람보다 훨씬 빠르고(시작 로그 wall speed)
+--   대신 페이즈 1 데미지가 가장 약하다. 11-18~19 오전엔 흰 원의 2배였는데, 시작 때 파란 원이 안 보이고
+--   축소 시작 순간 그 원 밖에 있던 사람이 예고 없이 데미지를 받아서 되돌렸다 (11-19 t3 결정)
 -- 시간은 서버 getTimestampMs 기준. 클라에는 "구간 남은 ms" 로 보내고 클라가 자기 시계로 센다.
 -- 데미지: 서버가 BodyDamage:ReduceGeneralHealth 후 sendDamage(player) 로 BodyDamage 전체를 클라에 보낸다
 --   (바닐라 ISSmashWindow:complete 와 같은 방식, PlayerDamagePacket).
@@ -82,9 +84,12 @@ local function pickFirst(hintX, hintY)
     return { x = ZombRandFloat(x1 + r, x2 - r), y = ZombRandFloat(y1 + r, y2 - r), r = r }
 end
 
--- 시작 파란 원: 페이즈 1 흰 원과 같은 중심, 반지름 x START_RADIUS_MUL
+-- 시작 파란 원: 페이즈 1 흰 원과 같은 중심, 영역 네 모서리 중 가장 먼 곳까지 닿는 반지름 (영역 전체를 덮는다)
 local function initialBlue(first)
-    return { x = first.x, y = first.y, r = first.r * B.START_RADIUS_MUL }
+    local x1, y1, x2, y2 = area()
+    local dx = math.max(first.x - x1, x2 - first.x)
+    local dy = math.max(first.y - y1, y2 - first.y)
+    return { x = first.x, y = first.y, r = math.sqrt(dx * dx + dy * dy) }
 end
 
 -- 다음 흰 원: 이전 흰 원 안에 통째로 들어가는 무작위 원 (원판 위 균일 분포)
@@ -177,6 +182,11 @@ local function startRound(by, hintX, hintY)
     log(string.format("round %d started by %s: area=(%d,%d)-(%d,%d) waitScale=%.2f shrinkScale=%.2f damageScale=%.2f first=(%.0f,%.0f r%.0f) start blue r%.0f",
         S.id, tostring(by), x1, y1, x2, y2, B.opt("WaitScale"), B.opt("ShrinkScale"), B.opt("DamageScale"),
         first.x, first.y, first.r, S.from.r))
+    -- 페이즈 1 벽 속도(반지름 기준 타일/초). 영역 전체에서 줄어들어 사람보다 빠르다 -> 축소 시간 조정 판단용
+    local shrinkSec = B.durMs(B.PHASES[1].shrink, "shrink") / 1000
+    if shrinkSec > 0 then
+        log(string.format("phase 1 wall speed: (r%.0f -> r%.0f) / %.0fs = %.1f tiles/s", S.from.r, first.r, shrinkSec, (S.from.r - first.r) / shrinkSec))
+    end
     broadcast(now, "start")
 end
 
@@ -237,11 +247,6 @@ end
 local function statusLog(now)
     speedLog(now)
     local cx, cy, r = currentBlue(now)
-    if not B.blueActive(S) then
-        log(string.format("status round=%d phase=%d seg=%s remain=%dms paused=%s blue=inactive(start r%.0f) white=(%.0f,%.0f r%.0f)",
-            S.id, S.phase, S.seg, remainMs(now), tostring(S.pausedAt ~= nil), r, S.white.x, S.white.y, S.white.r))
-        return
-    end
     local outside = {}
     for _, p in ipairs(players()) do
         if not p:isDead() then

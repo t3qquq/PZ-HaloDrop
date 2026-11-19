@@ -189,4 +189,4 @@ function ISMiniMapInner:render()
     self:clearStencilRect()
 end
 
-log("display: loaded (white+blue world line in iso only, map/minimap circles, outside tint; blue hidden until phase 1 shrink)")
+log("display: loaded (white+blue world line in iso only, map/minimap circles, outside tint; start blue covers the whole area)")

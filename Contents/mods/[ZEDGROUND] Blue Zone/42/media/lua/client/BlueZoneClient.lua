@@ -3,7 +3,7 @@
 -- 표시(지도 원, 타이머, 경고)는 이 파일에서 하지 않는다. HUD 모드·지도가 아래 함수로 읽어 간다.
 --   BlueZone.C              마지막 스냅샷 (nil = 대기). 필드는 서버 snapshot() 참고
 --   BlueZone.remainMs()     지금 구간 남은 ms (일시정지면 고정)
---   BlueZone.currentBlue()  지금 파란 원 cx, cy, r (라운드가 없거나 페이즈 1 대기라 파란 원이 아직 없으면 nil)
+--   BlueZone.currentBlue()  지금 파란 원 cx, cy, r (라운드가 없으면 nil)
 --   BlueZone.isPlayerOutside(p)
 --   BlueZone.onChange(fn)  상태가 바뀌면(State 수신·Stopped) fn() 호출. Viewpoint 벽 브리지가 쓴다
 

@@ -7,7 +7,7 @@
   "Sandbox_BlueZone_DamageScale": "데미지 배율",
   "Sandbox_BlueZone_DamageScale_tooltip": "자기장 밖 초당 데미지에 곱한다. 기본 페이즈별 초당 0.4 ~ 11 (체력 100 기준). 0 이면 데미지 없음.",
   "Sandbox_BlueZone_FirstRadius": "첫 원 반지름 (타일)",
-  "Sandbox_BlueZone_FirstRadius_tooltip": "페이즈 1 흰 원의 반지름. 시작 파란 원은 이 값의 2배이고 같은 중심이다. 이후 페이즈는 0.65, 0.5 비율로 줄어든다. 기본 1500 은 20~30명 기준. 영역 짧은 변의 절반보다 크면 잘린다.",
+  "Sandbox_BlueZone_FirstRadius_tooltip": "페이즈 1 흰 원의 반지름. 시작 파란 원은 같은 중심에서 영역 전체를 덮는 크기다. 이후 페이즈는 0.65, 0.5 비율로 줄어든다. 기본 1500 은 20~30명 기준. 영역 짧은 변의 절반보다 크면 잘린다.",
   "Sandbox_BlueZone_AreaX1": "영역 X1 (서쪽)",
   "Sandbox_BlueZone_AreaX1_tooltip": "자기장 영역 사각형의 서쪽 끝 (월드 타일 좌표). 시작 파란 원은 이 사각형을 다 덮고, 페이즈 1 흰 원은 이 안에 통째로 들어간다.",
   "Sandbox_BlueZone_AreaY1": "영역 Y1 (북쪽)",

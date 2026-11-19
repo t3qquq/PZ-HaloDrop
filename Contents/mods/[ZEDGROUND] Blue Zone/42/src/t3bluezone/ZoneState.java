@@ -9,8 +9,9 @@ import java.lang.reflect.Method;
  * Lua: the global table BlueZone.C (BlueZoneClient.lua) is the last server snapshot. It is replaced as a whole on every
  * State and set to nil on Stopped, never edited in place, so reading its fields from the render thread sees one snapshot.
  * Fields used: phase, seg, dur, remain, paused, recvAt (getTimestampMs = System.currentTimeMillis), fx fy fr, wx wy wr.
- * The blue circle exists from the phase 1 shrink on (BlueZone.blueActive in BlueZoneConfig.lua): nothing to draw
- * during the phase 1 wait. During "shrink" it moves from f* to w* linearly, as BlueZone.blueAt does.
+ * The blue circle exists for the whole round (BlueZone.blueActive in BlueZoneConfig.lua; since 0.3.2 the start circle
+ * covers the whole area instead of being hidden during the phase 1 wait). During "shrink" it moves from f* to w*
+ * linearly, as BlueZone.blueAt does.
  * Player: IsoPlayer.getInstance() x / y, used to pick the arc near the player.
  * Camera: BlueZone.VP { yaw, at } (BlueZoneDisplay.lua, Viewpoint's eye yaw in world atan2(dy, dx) degrees and the
  * getTimestampMs it was read at), used by BlueZoneWall to check its axis mapping. NaN when Lua has not sent one.
@@ -71,7 +72,7 @@ public final class ZoneState {
         return v instanceof Number ? ((Number) v).doubleValue() : Double.NaN;
     }
 
-    /** current blue circle {cx, cy, r} in world tiles, or null when there is none (no round / phase 1 wait / error) */
+    /** current blue circle {cx, cy, r} in world tiles, or null when there is none (no round / error) */
     static double[] currentBlue() {
         if (!resolve()) return null;
         try {
@@ -90,7 +91,7 @@ public final class ZoneState {
             if (c == null) { note("no round"); return null; }
             double phase = num(c, "phase");
             Object seg = get(c, "seg");
-            if (!(phase >= 1) || (phase == 1 && "wait".equals(seg))) { note("blue inactive (phase " + (long) phase + " " + seg + ")"); return null; }
+            if (!(phase >= 1)) { note("blue inactive (phase " + (long) phase + " " + seg + ")"); return null; }
             double fx = num(c, "fx"), fy = num(c, "fy"), fr = num(c, "fr");
             double wx = num(c, "wx"), wy = num(c, "wy"), wr = num(c, "wr");
             if (!"shrink".equals(seg) || !(wr >= 0)) { note("blue still phase " + (long) phase + " " + seg); return new double[] { fx, fy, fr }; }
