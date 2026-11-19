@@ -25,7 +25,12 @@ end
 
 -- ── 경로 준비 대기 음악 ──────────────────────────────────────────────────────
 -- Prep 을 받는 동안(출발 전) 메인 테마를 UI emitter 로 반복 재생한다. 캐시가 비워지면
--- (Flight 수신 = 출발, Closed) 끈다. 2D 소리라 플레이어 위치와 무관하게 같은 크기로 들린다.
+-- (Flight 수신 = 출발, Closed) 끈다.
+-- 방향 없는 소리로 만들기 (11-19 t3: Viewpoint 에서 마우스를 돌리면 음악이 좌우로 흔들렸다):
+--   사운드 스크립트 is3D = false 는 읽기만 하고 쓰는 곳이 없다 (b42.22.2: GameSound.is3d 를 참조하는 코드 없음).
+--   playUISound 는 UI emitter 를 재생 순간의 플레이어 위치에 놓으므로 3D 소리로 난다. 바닐라는 듣는 위치가
+--   플레이어라 가운데서 들리지만, Viewpoint 는 듣는 위치·방향을 카메라로 옮긴다 (fmod SoundListener.tick 패치).
+--   그래서 재생 직후 emitter 의 set3D(handle, false) 로 3D 를 끈다 (바닐라 차량 후진 경고음과 같은 방식).
 local PREP_MUSIC = "halodrop_main_theme"
 local prepMusic = nil
 
@@ -38,7 +43,8 @@ local function startPrepMusic()
         prepMusic = nil
         return
     end
-    log("prep music: start")
+    local ok, err = pcall(function() sm:getUIEmitter():set3D(prepMusic, false) end)
+    log("prep music: start, set3D(false) ok=" .. tostring(ok) .. (ok and "" or (" err=" .. tostring(err))))
 end
 
 local function stopPrepMusic(why)
