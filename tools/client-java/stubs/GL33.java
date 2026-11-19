@@ -20,6 +20,15 @@ public final class GL33 {
     public static final int GL_CURRENT_PROGRAM = 0x8B8D;
     public static final int GL_DRAW_FRAMEBUFFER_BINDING = 0x8CA6, GL_READ_FRAMEBUFFER = 0x8CA8, GL_DRAW_FRAMEBUFFER = 0x8CA9, GL_READ_FRAMEBUFFER_BINDING = 0x8CAA;
 
+    public static final int GL_NO_ERROR = 0, GL_TEXTURE_2D = 0x0DE1, GL_TEXTURE_WIDTH = 0x1000, GL_TEXTURE_HEIGHT = 0x1001, GL_TEXTURE_INTERNAL_FORMAT = 0x1003;
+    public static final int GL_TEXTURE_BINDING_2D = 0x8069, GL_TEXTURE_COMPARE_MODE = 0x884C;
+    public static final int GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE = 0x8CD0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME = 0x8CD1, GL_COLOR_ATTACHMENT0 = 0x8CE0, GL_DEPTH_ATTACHMENT = 0x8D00;
+
+    public static native void glBindTexture(int target, int texture);
+    public static native int glGetError();
+    public static native int glGetFramebufferAttachmentParameteri(int target, int attachment, int pname);
+    public static native int glGetTexLevelParameteri(int target, int level, int pname);
+    public static native int glGetTexParameteri(int target, int pname);
     public static native void glAttachShader(int program, int shader);
     public static native void glBeginQuery(int target, int id);
     public static native void glBindFramebuffer(int target, int framebuffer);

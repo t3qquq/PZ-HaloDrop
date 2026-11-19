@@ -31,6 +31,9 @@ import static org.lwjgl.opengl.GL33.*;
  * 32-bit floats stay exact for circles thousands of tiles wide.
  * Look: sandbox BlueZone.Style (read by ZoneState, the server's value reaches every client).
  *   1 field (0.2.0): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
+ *   2 gas (0.7.1): one thin curtain right on the circle (EDGE_*), so the line between safe and gassed ground reads at a
+ *     glance (run 11-19 17:54: puffs and shells spilled a few tiles inside and blurred where the zone ends). The gas
+ *     itself now starts at the line instead of up to ~9 tiles inside it.
  *   2 gas (0.7.0): near the camera the gas is billboard puffs (see PUFF_RANGE), the shells below are the far backdrop.
  *   2 gas (0.6.0): contaminated zone - a bank of rolling gas that hugs the ground (GAS_TALL high, GAS_LAYERS * GAS_GAP
  *     tiles deep). 0.5.0 drew three flat sheets as tall as the field wall with a slow 2D pattern: on video (run 11-19
@@ -76,6 +79,10 @@ public final class BlueZoneWall {
     // Distance fade, both styles (0.6.1). Viewpoint hazes far terrain and trees toward the sky colour, the wall was drawn
     // at full strength: on video (run 11-19 Gas, 9:46) far forest in front of the wall hid its foot and looked like sky,
     // so the wall seemed to float, and its far end was cut by a straight vertical edge (far plane 400 / ARC_HALF).
+    // Edge curtain (0.7.1): one sheet on the circle itself, a gas-coloured veil lower than the cloud. Unlike the shells it
+    // does not fade at the ground, so where it meets the ground it draws the boundary line.
+    static final float EDGE_ALPHA = 0.50f;   // peak opacity of the curtain
+    static final float EDGE_TALL = 20f;      // curtain height above the ground (render units); the top waves between 0.55x and 1.05x
     static final float FADE_NEAR = 170f;     // tiles from the camera where the wall starts to fade
     static final float FADE_FAR = 330f;      // gone from here on (before the far plane and the end of the arc)
 
@@ -147,6 +154,18 @@ public final class BlueZoneWall {
             "    float u = vUV.x; float v = vUV.y;\n" +
             "    float haze = 1.0 - smoothstep(uOrg.z, uOrg.w, length(vW - uCam.xyz));\n" + // distance fade (both styles), see FADE_NEAR
             "    if (haze <= 0.0) discard;\n" +
+            "    if (uStyle > 2.5) {\n" + // gas edge curtain (0.7.1): no ground fade, so it draws the line where it meets the ground
+            "        float hgt = vW.z - uGas.w;\n" +
+            "        float topH = uGas.z * (0.55 + 0.50 * noise(vec2(u * 0.035 + uTime * 0.06, 3.7)));\n" +
+            "        float vf = 1.0 - smoothstep(topH * 0.30, topH, hgt);\n" +
+            "        if (vf <= 0.0) discard;\n" +
+            "        float n = noise(vec2(u * 0.09 - uTime * 0.16, hgt * 0.11 - uTime * 0.05)) * 0.6\n" +
+            "                + noise(vec2(u * 0.27 + uTime * 0.35, hgt * 0.33 + uTime * 0.10)) * 0.4;\n" +
+            "        float lit = clamp(hgt / max(topH, 0.01), 0.0, 1.0) * (0.45 + 0.55 * n);\n" +
+            "        vec3 c = mix(uColor.rgb * vec3(0.30, 0.42, 0.42), uColor.rgb * 1.10 + vec3(0.12, 0.10, 0.02), lit);\n" +
+            "        fragColor = vec4(c, clamp(uColor.a * (0.60 + 0.55 * n) * vf, 0.0, 0.85) * haze);\n" +
+            "        return;\n" +
+            "    }\n" +
             "    if (uStyle > 1.5) {\n" +
             "        float gap = uGas.x; float thick = uGas.y; float tall = uGas.z; float ground = uGas.w;\n" +
             "        vec3 d = normalize(vW - uCam.xyz);\n" + // view ray through this shell point
@@ -167,7 +186,7 @@ public final class BlueZoneWall {
             "        float n = noise3(P * vec3(0.060, 0.060, 0.100) + wind * 0.060 + vec3(0.0, 0.0, uTime * 0.020)) * 0.55\n" +
             "                + noise3(P * vec3(0.150, 0.150, 0.230) + wind * 0.150 + vec3(7.3, 1.9, -uTime * 0.050)) * 0.30\n" +
             "                + noise3(P * vec3(0.410, 0.410, 0.560) + wind * 0.410 + vec3(3.1, 5.7, -uTime * 0.110)) * 0.15;\n" +
-            "        float front = smoothstep(-2.0, 6.0, s + (n - 0.5) * 14.0);\n" + // billowing edge at the circle
+            "        float front = smoothstep(0.0, 6.0, s + (n - 0.5) * 6.0);\n" + // billowing edge, starts at most ~3 tiles inside the circle (0.7.1, was ~9)
             "        float back = 1.0 - smoothstep(thick * 0.70, thick, s);\n" + // thins out at the far side of the slab
             "        float puff = clamp((n - 0.32) * 2.9, 0.0, 1.0);\n" +
             "        float dens = (0.10 + 1.70 * puff * puff) * hf * front * back;\n" +
@@ -601,12 +620,15 @@ public final class BlueZoneWall {
                 glUniform1f(uStyle, gas ? 2f : 1f);
                 if (style != lastStyle) {
                     lastStyle = style;
-                    log("wall style " + style + (gas ? " (gas, " + GAS_LAYERS + " shells " + GAS_GAP + " tiles apart, cloud " + GAS_TALL + " high, camera "
+                    log("wall style " + style + (gas ? " (gas, edge curtain a=" + EDGE_ALPHA + " " + EDGE_TALL + " high, " + GAS_LAYERS + " shells " + GAS_GAP + " tiles apart, cloud " + GAS_TALL + " high, camera "
                             + f1(camS) + " tiles outside the edge, puffs within " + PUFF_RANGE + " tiles)" : " (field)") + " fade " + FADE_NEAR + "-" + FADE_FAR + " tiles");
                 }
 
                 boolean counting = beginSamples();
                 if (gas) {
+                    // edge curtain: behind the gas when the camera stands in it, otherwise in front of it
+                    boolean edgeFirst = camS > 0f;
+                    if (edgeFirst) drawEdge(quads);
                     // shells farthest from the camera first: the camera can stand inside the zone, in the gas or beyond it
                     for (int i = 0; i < GAS_LAYERS; i++) gasOrder[i] = i;
                     for (int i = 1; i < GAS_LAYERS; i++) {
@@ -622,6 +644,11 @@ public final class BlueZoneWall {
                         glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
                     }
                     lastPuffs = drawPuffs(view, proj, colMajor, cam, mm, org, blue, cwx, cwy, camS, (float) (v.seconds() % 1000.0));
+                    if (!edgeFirst) {
+                        glUseProgram(program);                                              // drawPuffs switched program and blend
+                        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
+                        drawEdge(quads);
+                    }
                 } else {
                     lastPuffs = 0;
                     glUniform1f(uOff, 0f);
@@ -656,6 +683,22 @@ public final class BlueZoneWall {
         }
     }
 
+    /**
+     * Gas edge curtain (0.7.1): the arc once more at the circle (uOff 0) with the curtain branch of FS. Called with the
+     * wall program bound and its blend set; puts back the gas uniforms it changes so the shells can follow.
+     */
+    private void drawEdge(int quads) {
+        glUniform1f(uStyle, 3f);
+        glUniform1f(uOff, 0f);
+        glUniform1f(uSeed, -1f);
+        glUniform4f(uColor, GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], EDGE_ALPHA);
+        glUniform4f(uGas, GAS_GAP, GAS_GAP * GAS_LAYERS, EDGE_TALL, GAS_GROUND);
+        glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
+        glUniform1f(uStyle, 2f);
+        glUniform4f(uColor, GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], GAS_COLOR[3]);
+        glUniform4f(uGas, GAS_GAP, GAS_GAP * GAS_LAYERS, GAS_TALL, GAS_GROUND);
+    }
+
     // ── gas puffs ──────────────────────────────────────────────
 
     /** 0..1 from three ints, the same on every client (puff layout must not depend on the machine) */
@@ -685,10 +728,10 @@ public final class BlueZoneWall {
             for (int gy = c0y; gy <= c1y && n < MAX_PUFFS - 3; gy++) {
                 double wx = (gx + 0.15 + 0.7 * ih(gx, gy, 1)) * PUFF_CELL, wy = (gy + 0.15 + 0.7 * ih(gx, gy, 2)) * PUFF_CELL;
                 double s = Math.hypot(wx - blue[0], wy - blue[1]) - blue[2];
-                if (s < -3 || s > PUFF_DEPTH) continue;
+                if (s < 1 || s > PUFF_DEPTH) continue;                                 // 0.7.1: was -3, puffs spilled into the safe zone
                 double d = Math.hypot(wx - camWX, wy - camWY);
                 if (d > PUFF_RANGE) continue;
-                float band = clamp01((s + 3) / 8.0) * (1f - clamp01((s - PUFF_DEPTH * 0.75) / (PUFF_DEPTH * 0.25)));
+                float band = clamp01((s - 1) / 6.0) * (1f - clamp01((s - PUFF_DEPTH * 0.75) / (PUFF_DEPTH * 0.25)));
                 float edge = 1f - clamp01((d - PUFF_RANGE * 0.7) / (PUFF_RANGE * 0.3));
                 float a0 = PUFF_ALPHA * band * edge * thin;
                 if (a0 < 0.01f) continue;
