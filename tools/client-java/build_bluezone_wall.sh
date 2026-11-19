@@ -5,7 +5,8 @@
 # Loaded by ZombieBuddy at server join (mod.info javaJarFile / javaPkgName), like Halo Drop's client jar.
 # Until 0.2.0 it was a Viewpoint addon (media/viewpoint/addons/t3bluezone): Viewpoint only discovers addons among the
 # mods enabled at the main menu, so a server mod never loaded. See BlueZoneWall.java.
-# Compiles against Viewpoint's public API (viewpoint.api.*, not shipped) and the compile-only stub ./stubs/Patch.java.
+# Compiles against Viewpoint's public API (viewpoint.api.*, not shipped) and the compile-only stubs ./stubs/Patch.java
+# (ZombieBuddy) and ./stubs/GL33.java (LWJGL: the wall draws with plain OpenGL calls since 0.4.0).
 # Usage: tools/client-java/build_bluezone_wall.sh <path to Viewpoint.jar>
 #   e.g. "/e/Steam/steamapps/workshop/content/108600/3809306528/mods/Viewpoint/42/media/java/client/Viewpoint.jar"
 # Needs a JDK 21+.
@@ -18,7 +19,7 @@ out="$mod/media/java/client"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/stubs" "$tmp/classes" "$out"
-javac --release 21 -d "$tmp/stubs" "$here/stubs/Patch.java"
+javac --release 21 -d "$tmp/stubs" "$here/stubs/Patch.java" "$here/stubs/GL33.java"
 javac --release 21 -Xlint:all -cp "$tmp/stubs:$vp" -d "$tmp/classes" "$mod/src/t3bluezone/"*.java
 
 # ZombieBuddy inlines @Patch advice into the target class (another package): what the advice calls must be public

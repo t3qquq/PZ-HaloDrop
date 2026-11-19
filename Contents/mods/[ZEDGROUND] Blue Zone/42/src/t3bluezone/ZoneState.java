@@ -94,7 +94,7 @@ public final class ZoneState {
             if (!(phase >= 1)) { note("blue inactive (phase " + (long) phase + " " + seg + ")"); return null; }
             double fx = num(c, "fx"), fy = num(c, "fy"), fr = num(c, "fr");
             double wx = num(c, "wx"), wy = num(c, "wy"), wr = num(c, "wr");
-            if (!"shrink".equals(seg) || !(wr >= 0)) { note("blue still phase " + (long) phase + " " + seg); return new double[] { fx, fy, fr }; }
+            if (!"shrink".equals(seg) || !(wr >= 0)) { note("blue fixed (phase " + (long) phase + " " + seg + ")"); return new double[] { fx, fy, fr }; }
             double dur = num(c, "dur"), remain = num(c, "remain"), recvAt = num(c, "recvAt");
             boolean paused = Boolean.TRUE.equals(get(c, "paused"));
             double elapsed = paused ? 0 : System.currentTimeMillis() - recvAt;

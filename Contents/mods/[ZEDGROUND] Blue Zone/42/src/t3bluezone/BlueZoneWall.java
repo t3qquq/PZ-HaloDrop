@@ -1,14 +1,10 @@
 package t3bluezone;
 
-import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import viewpoint.api.render.FrameView;
-import viewpoint.api.render.Gpu;
-import viewpoint.api.render.GpuBuffer;
-import viewpoint.api.render.GpuMesh;
-import viewpoint.api.render.GpuProgram;
-import viewpoint.api.render.Primitive;
 import viewpoint.api.view.Vec3;
+
+import static org.lwjgl.opengl.GL33.*;
 
 /**
  * ZEDGROUND Blue Zone: the blue zone wall in Viewpoint 1st/3rd person.
@@ -20,26 +16,25 @@ import viewpoint.api.view.Vec3;
  * afterTranslucent() at the end of viewpoint.render.AddonDraws.afterTranslucent. 0.1/0.2 were a Viewpoint addon
  * (media/viewpoint/addons): Viewpoint only discovers addons among the mods enabled at the main menu, so a server mod
  * that is turned on by joining never loaded (run 11-18: "Viewpoint.Addons[t3bluezone] missing" the whole session).
- * Viewpoint's own pieces are reached by reflection, mirroring AddonDraws.world/run (javap of the 11-19 jar):
- *   AddonDraws.view(FrameContext) -> FrameView, WorldRenderer.bindTarget(), an AddonGpu(owner, id) with begin()/end().
- * The public viewpoint.api types (Gpu, GpuProgram, FrameView ...) are used directly. GL blend / depth state is set and
- * restored here (AddonGpu.draw does not touch it). Zone state comes from Lua's BlueZone.C (ZoneState).
+ *
+ * Drawing (0.4.0, 11-19): plain OpenGL 3.3 calls, the same way the PongDu Viewpoint effects draw (seen working in game).
+ * 0.3.x drew through Viewpoint's addon GPU wrapper (AddonGpu): that wrapper only hands out GPU objects to registered
+ * addons with a declared budget (addon.properties draw.gpuMiB), and this jar is not one, so the very first buffer was
+ * refused ("the draw object is refused: the addon holds 0 KiB of the 0 MiB it asked for") and the wall switched itself
+ * off after 3 errors, one frame after the edge came into range (run 11-19 long). Now only two Viewpoint internals are
+ * reached by reflection: AddonDraws.view(FrameContext) -> FrameView (matrices, scene origin) and
+ * WorldRenderer.bindTarget(). Every GL state that is changed is saved and put back.
  *
  * Geometry: only the arc of the current blue circle near the player (ARC_HALF tiles each side, at most MAX_QUADS quads),
- * a vertical band from camera height - BELOW to + ABOVE. Rebuilt and uploaded every frame.
- * Look (0.2.0, 11-19): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks,
- * strong enough to read as a wall from far away (0.1.0 was a faint striped film).
+ * a vertical band from camera height - BELOW to + ABOVE. There is no vertex buffer: the vertex shader builds the arc
+ * from gl_VertexID and a few uniforms (nearest wall point, radius, angle step), relative to the nearest wall point so
+ * 32-bit floats stay exact for circles thousands of tiles wide.
+ * Look (0.2.0, 11-19): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
  *
  * Axes (0.3.1, 11-19): FrameView.view() is relative to FrameView.sceneOrigin(), and sceneOrigin is in PZ world
- * coordinates (x tile, y tile, floor level) - run 11-19 logged sceneOrigin=(5209.4,9537.6,0.0) next to
- * player=(5209.4,9537.6) and a camera 2 units away from the render origin. 0.3.0 subtracted origin.z() (the floor level)
- * from the world y axis and compared absolute tiles with that origin-relative camera, so no mapping ever matched and
- * the wall was never drawn. Now: render (x, z) = +-(world x - origin.x), +-(world y - origin.y), height is render y.
- * The default signs are both negative (the same mapping the PongDu Viewpoint effects use against Viewpoint's frame
- * matrices, seen working in game). Because the player sits at the origin, position cannot tell the 8 candidates apart,
- * so the mapping is checked against the camera heading instead: Lua publishes Viewpoint's eye yaw (BlueZone.VP, world
- * atan2(dy, dx) degrees) and each candidate is scored by how well it turns that heading into the view matrix's forward
- * axis. After CAL_SAMPLES frames the best one is taken and logged ("axes calibrated"). Without a yaw the default stays.
+ * coordinates (x tile, y tile, floor level). Render (x, z) = +-(world x - origin.x), +-(world y - origin.y), height is
+ * render y. The default signs are both negative; run 11-19 long confirmed it ("axes calibrated: x=-dx,z=-dy score 1.0").
+ * The mapping is still checked against the camera heading Lua publishes (BlueZone.VP) in case Viewpoint changes it.
  */
 public final class BlueZoneWall {
     static final String TAG = "[BlueZone][VP] ";
@@ -55,21 +50,38 @@ public final class BlueZoneWall {
     static final long YAW_MAX_AGE_MS = 150L; // Lua's camera yaw older than this is not used
     static final float[] COLOR = { 0.12f, 0.38f, 1.00f, 0.42f };   // rgb = haze tint, a = base opacity
 
-    static final int FLOATS_PER_VERT = 5;    // x y z u v
     static final int VERTS_PER_QUAD = 6;
 
+    // world offset from the scene origin = uNear + uR * (rotation of the arc angle around uPhi); render xz = uMap * offset
     static final String VS =
-            "layout(location = 0) in vec3 aPos;\n" +
-            "layout(location = 1) in vec2 aUV;\n" +
+            "#version 330 core\n" +
             "uniform mat4 uView;\n" +
             "uniform mat4 uProj;\n" +
+            "uniform vec4 uNear;\n" +      // xy = nearest wall point, world tiles relative to the scene origin
+            "uniform vec4 uPhi;\n" +       // xy = cos, sin of the angle from the circle centre to that point
+            "uniform float uR;\n" +        // circle radius (tiles)
+            "uniform float uDa;\n" +       // angle per quad (radians)
+            "uniform float uQuads;\n" +
+            "uniform vec4 uMap;\n" +       // render x = uMap.x * wx + uMap.y * wy, render z = uMap.z * wx + uMap.w * wy
+            "uniform vec4 uY;\n" +         // x = wall bottom, y = top (render y)
+            "uniform float uU0;\n" +       // tiles along the circle at the nearest point (keeps the pattern fixed in the world)
             "out vec2 vUV;\n" +
+            "const vec2 CORNER[6] = vec2[6](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0));\n" +
             "void main() {\n" +
-            "    vUV = aUV;\n" +
-            "    gl_Position = uProj * uView * vec4(aPos, 1.0);\n" +
+            "    int quad = gl_VertexID / 6;\n" +
+            "    vec2 c = CORNER[gl_VertexID - quad * 6];\n" +
+            "    float d = (float(quad) + c.x - uQuads * 0.5) * uDa;\n" +
+            "    float s = sin(d);\n" +
+            "    float h = sin(d * 0.5);\n" +
+            "    float cm1 = -2.0 * h * h;\n" +                       // cos(d) - 1 without cancellation
+            "    vec2 w = uNear.xy + uR * vec2(uPhi.x * cm1 - uPhi.y * s, uPhi.y * cm1 + uPhi.x * s);\n" +
+            "    vec3 p = vec3(uMap.x * w.x + uMap.y * w.y, mix(uY.x, uY.y, c.y), uMap.z * w.x + uMap.w * w.y);\n" +
+            "    vUV = vec2(uU0 + uR * d, c.y);\n" +
+            "    gl_Position = uProj * uView * vec4(p, 1.0);\n" +
             "}\n";
-    // vUV.x = tiles along the arc, vUV.y = 0 (bottom) .. 1 (top)
+    // vUV.x = tiles along the circle, vUV.y = 0 (bottom) .. 1 (top)
     static final String FS =
+            "#version 330 core\n" +
             "in vec2 vUV;\n" +
             "uniform vec4 uColor;\n" +
             "uniform float uTime;\n" +
@@ -96,23 +108,22 @@ public final class BlueZoneWall {
             "    fragColor = vec4(c, clamp(a, 0.0, 0.92));\n" +
             "}\n";
 
-    static final int OWNER = 0x7B1E;          // AddonGpu owner number (only used by Viewpoint's own timers, which we skip)
-
     private static final BlueZoneWall INSTANCE = new BlueZoneWall();
 
-    private GpuProgram program;
-    private GpuBuffer buffer;
-    private GpuMesh mesh;
+    private int program, vao;
+    private int uView, uProj, uNear, uPhi, uR, uDa, uQuads, uMap, uY, uU0, uColor, uTime;
     private boolean broken;
     private int errors;
-    private final float[] verts = new float[MAX_QUADS * VERTS_PER_QUAD * FLOATS_PER_VERT];
 
     // Viewpoint internals (reflection, resolved on the first frame)
     private boolean vpResolved;
-    private Method mView, mBind, mBegin, mEnd;
-    private Gpu gpu;
-    private Method glIsEnabled, glEnable, glDisable, glBlendFunc, glDepthMask, glGetBoolean, glGetInteger;
+    private Method mView, mBind;
     private boolean firstDrawLogged;
+
+    // arc of this frame (filled by buildArc, read by the draw)
+    private final float[] arcNear = new float[2];
+    private final float[] arcPhi = new float[2];
+    private float arcR, arcDa, arcU0;
 
     // axis mapping (render thread only)
     private int mapping = DEFAULT_MAP; // bit0 swap world x/y, bit1 negate render x, bit2 negate render z
@@ -124,6 +135,12 @@ public final class BlueZoneWall {
     private long nextDiag;
     private long nextStat;
     private int drawnFrames, skippedFar;
+
+    // how many pixels of the wall reached the screen (occlusion query, about once a second; diagnostics only)
+    private int query;
+    private boolean queryOff, queryPending;
+    private long nextQuery;
+    private String lastSamples = "?";
 
     public static void log(String s) { System.out.println(TAG + s); }
 
@@ -140,24 +157,8 @@ public final class BlueZoneWall {
             mView = ad.getDeclaredMethod("view", frame.getClass());
             mView.setAccessible(true);
             mBind = Class.forName("viewpoint.render.WorldRenderer", false, cl).getMethod("bindTarget");
-            Class<?> ag = Class.forName("viewpoint.render.AddonGpu", false, cl);
-            Constructor<?> ctor = ag.getDeclaredConstructor(int.class, String.class);
-            ctor.setAccessible(true);
-            mBegin = ag.getDeclaredMethod("begin");
-            mBegin.setAccessible(true);
-            mEnd = ag.getDeclaredMethod("end");
-            mEnd.setAccessible(true);
-            gpu = (Gpu) ctor.newInstance(OWNER, "t3bluezone");
-            Class<?> gl = Class.forName("org.lwjgl.opengl.GL11", false, cl);
-            glIsEnabled = gl.getMethod("glIsEnabled", int.class);
-            glEnable = gl.getMethod("glEnable", int.class);
-            glDisable = gl.getMethod("glDisable", int.class);
-            glBlendFunc = gl.getMethod("glBlendFunc", int.class, int.class);
-            glDepthMask = gl.getMethod("glDepthMask", boolean.class);
-            glGetBoolean = gl.getMethod("glGetBoolean", int.class);
-            glGetInteger = gl.getMethod("glGetInteger", int.class);
             vpResolved = true;
-            log("viewpoint hooks resolved (AddonDraws.view, WorldRenderer.bindTarget, AddonGpu, GL11)");
+            log("viewpoint hooks resolved (AddonDraws.view, WorldRenderer.bindTarget)");
             return true;
         } catch (Throwable t) {
             broken = true;
@@ -166,14 +167,9 @@ public final class BlueZoneWall {
         }
     }
 
-    static final int GL_BLEND = 0x0BE2, GL_DEPTH_TEST = 0x0B71, GL_CULL_FACE = 0x0B44, GL_DEPTH_WRITEMASK = 0x0B72;
-    static final int GL_BLEND_SRC = 0x0BE1, GL_BLEND_DST = 0x0BE0, GL_SRC_ALPHA = 0x0302, GL_ONE_MINUS_SRC_ALPHA = 0x0303;
-
-    private void closeGpu() {
-        try { if (mesh != null) mesh.close(); } catch (Throwable ignored) { }
-        try { if (buffer != null) buffer.close(); } catch (Throwable ignored) { }
-        try { if (program != null) program.close(); } catch (Throwable ignored) { }
-        mesh = null; buffer = null; program = null;
+    private void closeGl() {
+        try { if (program != 0) glDeleteProgram(program); } catch (Throwable ignored) { }
+        program = 0;   // the vertex array is kept: it holds no data
     }
 
     private void fail(String where, Throwable t) {
@@ -182,37 +178,53 @@ public final class BlueZoneWall {
         if (errors >= 3) {
             broken = true;
             log("wall off after " + errors + " errors");
-            closeGpu();
+            closeGl();
         }
     }
 
-    private boolean gpuReady(Gpu gpu) {
-        if (program != null) return true;
-        try {
-            program = compile(gpu);
-            buffer = gpu.buffer(verts.length * 4);
-            mesh = gpu.mesh(buffer, 3, 2);
-            log("gpu ready: buffer " + (verts.length * 4) + " bytes, mesh attributes 3+2");
-            return true;
-        } catch (Throwable t) {
-            closeGpu();
-            fail("gpu setup", t);
-            return false;
+    private static int shader(int type, String src) {
+        int s = glCreateShader(type);
+        glShaderSource(s, src);
+        glCompileShader(s);
+        if (glGetShaderi(s, GL_COMPILE_STATUS) == 0) {
+            String info = glGetShaderInfoLog(s);
+            glDeleteShader(s);
+            throw new IllegalStateException((type == GL_VERTEX_SHADER ? "vertex" : "fragment") + " shader: " + info);
         }
+        return s;
     }
 
-    /** GLSL 330 first; if the host adds its own #version line, retry without ours. */
-    private GpuProgram compile(Gpu gpu) {
-        try {
-            GpuProgram p = gpu.program("#version 330 core\n" + VS, "#version 330 core\n" + FS);
-            log("shader compiled with #version 330 core");
-            return p;
-        } catch (RuntimeException first) {
-            log("shader with #version 330 core refused (" + first + "), retrying without a version line");
-            GpuProgram p = gpu.program(VS, FS);
-            log("shader compiled without a version line");
-            return p;
+    /** compiles the program and makes the (empty) vertex array; throws when the shader does not build */
+    private void initGl() {
+        if (program != 0) return;
+        int vs = shader(GL_VERTEX_SHADER, VS), fs = shader(GL_FRAGMENT_SHADER, FS);
+        int p = glCreateProgram();
+        glAttachShader(p, vs);
+        glAttachShader(p, fs);
+        glLinkProgram(p);
+        glDeleteShader(vs);
+        glDeleteShader(fs);
+        if (glGetProgrami(p, GL_LINK_STATUS) == 0) {
+            String info = glGetProgramInfoLog(p);
+            glDeleteProgram(p);
+            throw new IllegalStateException("program link: " + info);
         }
+        uView = glGetUniformLocation(p, "uView");
+        uProj = glGetUniformLocation(p, "uProj");
+        uNear = glGetUniformLocation(p, "uNear");
+        uPhi = glGetUniformLocation(p, "uPhi");
+        uR = glGetUniformLocation(p, "uR");
+        uDa = glGetUniformLocation(p, "uDa");
+        uQuads = glGetUniformLocation(p, "uQuads");
+        uMap = glGetUniformLocation(p, "uMap");
+        uY = glGetUniformLocation(p, "uY");
+        uU0 = glGetUniformLocation(p, "uU0");
+        uColor = glGetUniformLocation(p, "uColor");
+        uTime = glGetUniformLocation(p, "uTime");
+        if (vao == 0) vao = glGenVertexArrays();
+        program = p;
+        log("gl ready: program " + p + " vao " + vao + " uniforms view=" + uView + " proj=" + uProj + " near=" + uNear + " phi=" + uPhi
+                + " r=" + uR + " da=" + uDa + " quads=" + uQuads + " map=" + uMap + " y=" + uY + " u0=" + uU0 + " color=" + uColor + " time=" + uTime);
     }
 
     // ── axis mapping ───────────────────────────────────────────
@@ -253,6 +265,12 @@ public final class BlueZoneWall {
         boolean swap = (map & 1) != 0;
         double a = swap ? dy : dx, b = swap ? dx : dy;
         return new double[] { (map & 2) != 0 ? -a : a, (map & 4) != 0 ? -b : b };
+    }
+
+    /** the same mapping as a 2x2 matrix {m00, m01, m10, m11}: render x = m00 * dx + m01 * dy, render z = m10 * dx + m11 * dy */
+    static float[] mapMatrix(int map) {
+        double[] ex = dir(map, 1, 0), ey = dir(map, 0, 1);
+        return new float[] { (float) ex[0], (float) ey[0], (float) ex[1], (float) ey[1] };
     }
 
     /** world tile (wx, wy) -> render (x, z): relative to the scene origin (world x, world y, floor level) */
@@ -332,6 +350,8 @@ public final class BlueZoneWall {
 
     // ── draw ───────────────────────────────────────────────────
 
+    private static void toggle(int cap, boolean on) { if (on) glEnable(cap); else glDisable(cap); }
+
     private void draw(Object frame) {
         if (broken) return;
         double[] blue = ZoneState.currentBlue();
@@ -347,53 +367,113 @@ public final class BlueZoneWall {
             lastFwdDot = headingDot(view, cam);
             stats(quads, blue, cam);
             if (quads == 0) return;
-            mBind.invoke(null);
-            mBegin.invoke(gpu);
-            boolean blend = false, depthTest = false, cull = false, depthWrite = true;
-            int src = GL_SRC_ALPHA, dst = GL_ONE_MINUS_SRC_ALPHA;
-            boolean saved = false;
+
+            int oldProgram = glGetInteger(GL_CURRENT_PROGRAM), oldVao = glGetInteger(GL_VERTEX_ARRAY_BINDING);
+            int fbo = glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING), readFbo = glGetInteger(GL_READ_FRAMEBUFFER_BINDING);
+            int[] viewport = new int[4];
+            glGetIntegerv(GL_VIEWPORT, viewport);
+            boolean blend = glIsEnabled(GL_BLEND), depth = glIsEnabled(GL_DEPTH_TEST), cull = glIsEnabled(GL_CULL_FACE),
+                    scissor = glIsEnabled(GL_SCISSOR_TEST), mask = glGetBoolean(GL_DEPTH_WRITEMASK);
+            int df = glGetInteger(GL_DEPTH_FUNC), sr = glGetInteger(GL_BLEND_SRC_RGB), dr = glGetInteger(GL_BLEND_DST_RGB),
+                    sa = glGetInteger(GL_BLEND_SRC_ALPHA), da = glGetInteger(GL_BLEND_DST_ALPHA),
+                    er = glGetInteger(GL_BLEND_EQUATION_RGB), ea = glGetInteger(GL_BLEND_EQUATION_ALPHA);
             try {
-                if (!gpuReady(gpu)) return;
-                blend = (Boolean) glIsEnabled.invoke(null, GL_BLEND);
-                depthTest = (Boolean) glIsEnabled.invoke(null, GL_DEPTH_TEST);
-                cull = (Boolean) glIsEnabled.invoke(null, GL_CULL_FACE);
-                depthWrite = (Boolean) glGetBoolean.invoke(null, GL_DEPTH_WRITEMASK);
-                src = (Integer) glGetInteger.invoke(null, GL_BLEND_SRC);
-                dst = (Integer) glGetInteger.invoke(null, GL_BLEND_DST);
-                saved = true;
-                glEnable.invoke(null, GL_BLEND);
-                glBlendFunc.invoke(null, GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-                glEnable.invoke(null, GL_DEPTH_TEST);     // buildings in front hide the wall
-                glDepthMask.invoke(null, false);          // the see-through wall does not hide what is behind it
-                glDisable.invoke(null, GL_CULL_FACE);     // both sides: seen from inside and outside the zone
-                buffer.upload(verts);
-                program.setMatrix("uView", view)
-                       .setMatrix("uProj", proj)
-                       .set("uColor", COLOR)
-                       .set("uTime", (float) (v.seconds() % 1000.0));
-                gpu.draw(program, mesh, Primitive.TRIANGLES, 0, quads * VERTS_PER_QUAD);
+                initGl();
+                mBind.invoke(null);
+                glUseProgram(program);
+                glBindVertexArray(vao);
+                glEnable(GL_BLEND);
+                glBlendEquationSeparate(GL_FUNC_ADD, GL_FUNC_ADD);
+                glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);   // the target's alpha is left alone
+                glEnable(GL_DEPTH_TEST);                  // buildings and hills in front hide the wall
+                glDepthFunc(GL_LEQUAL);
+                glDepthMask(false);                       // the see-through wall does not hide what is behind it
+                glDisable(GL_CULL_FACE);                  // both sides: seen from inside and outside the zone
+                glDisable(GL_SCISSOR_TEST);
+
+                boolean colMajor = cam[3] > 0;
+                glUniformMatrix4fv(uView, !colMajor, view);
+                glUniformMatrix4fv(uProj, !colMajor, proj);
+                glUniform4f(uNear, arcNear[0], arcNear[1], 0f, 0f);
+                glUniform4f(uPhi, arcPhi[0], arcPhi[1], 0f, 0f);
+                glUniform1f(uR, arcR);
+                glUniform1f(uDa, arcDa);
+                glUniform1f(uQuads, quads);
+                float[] mm = mapMatrix(mapping);
+                glUniform4f(uMap, mm[0], mm[1], mm[2], mm[3]);
+                glUniform4f(uY, (float) (cam[1] - BELOW), (float) (cam[1] + ABOVE), 0f, 0f);
+                glUniform1f(uU0, arcU0);
+                glUniform4f(uColor, COLOR[0], COLOR[1], COLOR[2], COLOR[3]);
+                glUniform1f(uTime, (float) (v.seconds() % 1000.0));
+
+                boolean counting = beginSamples();
+                glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
+                if (counting) endSamples();
                 if (!firstDrawLogged) {
                     firstDrawLogged = true;
                     log("first wall draw: quads=" + quads + " axes=" + mapName(mapping) + " nearestWallNdc=" + lastNdc + " blue=(" + f1(blue[0]) + "," + f1(blue[1]) + " r" + f1(blue[2])
-                            + ") gl before: blend=" + blend + " depthTest=" + depthTest + " cull=" + cull + " depthWrite=" + depthWrite);
+                            + ") colMajor=" + colMajor + " proj[10]=" + proj[10] + " proj[14]=" + proj[14]
+                            + " viewport=" + viewport[2] + "x" + viewport[3]
+                            + " gl before: blend=" + blend + " depthTest=" + depth + " depthFunc=0x" + Integer.toHexString(df) + " cull=" + cull + " depthWrite=" + mask);
                 }
             } finally {
-                if (saved) {
-                    if (!blend) glDisable.invoke(null, GL_BLEND);
-                    glBlendFunc.invoke(null, src, dst);
-                    if (!depthTest) glDisable.invoke(null, GL_DEPTH_TEST);
-                    glDepthMask.invoke(null, depthWrite);
-                    if (cull) glEnable.invoke(null, GL_CULL_FACE);
-                }
-                mEnd.invoke(gpu);
-                mBind.invoke(null);
+                glUseProgram(oldProgram);
+                glBindVertexArray(oldVao);
+                glBlendEquationSeparate(er, ea);
+                glBlendFuncSeparate(sr, dr, sa, da);
+                toggle(GL_BLEND, blend);
+                glDepthFunc(df);
+                glDepthMask(mask);
+                toggle(GL_DEPTH_TEST, depth);
+                toggle(GL_CULL_FACE, cull);
+                toggle(GL_SCISSOR_TEST, scissor);
+                glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
+                glBindFramebuffer(GL_READ_FRAMEBUFFER, readFbo);
+                glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
             }
         } catch (Throwable t) {
             fail("draw", t);
         }
     }
 
-    /** fills verts with the arc of the blue circle facing the player; returns the quad count */
+    // ── drawn pixel count (diagnostics only: a failure here never turns the wall off) ──
+
+    /** reads the last count and starts a new one about once a second; false when this frame is not counted */
+    private boolean beginSamples() {
+        if (queryOff) return false;
+        try {
+            if (queryPending) {
+                if (glGetQueryObjecti(query, GL_QUERY_RESULT_AVAILABLE) == 0) return false;
+                lastSamples = String.valueOf(glGetQueryObjecti(query, GL_QUERY_RESULT));
+                queryPending = false;
+            }
+            long now = System.currentTimeMillis();
+            if (now < nextQuery) return false;
+            if (glGetQueryi(GL_SAMPLES_PASSED, GL_CURRENT_QUERY) != 0) return false;   // Viewpoint is counting: leave it alone
+            nextQuery = now + 1000L;
+            if (query == 0) query = glGenQueries();
+            glBeginQuery(GL_SAMPLES_PASSED, query);
+            return true;
+        } catch (Throwable t) {
+            queryOff = true;
+            lastSamples = "off";
+            log("pixel count off (wall still draws): " + t);
+            return false;
+        }
+    }
+
+    private void endSamples() {
+        try {
+            glEndQuery(GL_SAMPLES_PASSED);
+            queryPending = true;
+        } catch (Throwable t) {
+            queryOff = true;
+            lastSamples = "off";
+            log("pixel count off (wall still draws): " + t);
+        }
+    }
+
+    /** works out the arc of the blue circle facing the player (arcNear / arcPhi / arcR / arcDa); returns the quad count */
     private int buildArc(double[] blue, double[] cam, FrameView v, float[] view, float[] proj) {
         double cx = blue[0], cy = blue[1], r = blue[2];
         double px = ZoneState.px, py = ZoneState.py;
@@ -404,28 +484,18 @@ public final class BlueZoneWall {
         double span = Math.min(Math.PI, ARC_HALF / r);
         int quads = (int) Math.ceil(2 * span * r / SEG);
         if (quads < 4) quads = 4; else if (quads > MAX_QUADS) quads = MAX_QUADS;
-        double a0 = phi - span, da = 2 * span / quads;
-        float yLo = (float) (cam[1] - BELOW), yHi = (float) (cam[1] + ABOVE);
         Vec3 origin = v.sceneOrigin();
-        int k = 0;
-        double[] p1 = toRender(mapping, cx + r * Math.cos(a0), cy + r * Math.sin(a0), origin);
-        float u1 = 0f;
-        for (int i = 1; i <= quads; i++) {
-            double a = a0 + da * i;
-            double[] p2 = toRender(mapping, cx + r * Math.cos(a), cy + r * Math.sin(a), origin);
-            float u2 = (float) (r * da * i);
-            k = vert(k, p1, yLo, u1, 0f);
-            k = vert(k, p2, yLo, u2, 0f);
-            k = vert(k, p2, yHi, u2, 1f);
-            k = vert(k, p1, yLo, u1, 0f);
-            k = vert(k, p2, yHi, u2, 1f);
-            k = vert(k, p1, yHi, u1, 1f);
-            p1 = p2;
-            u1 = u2;
-        }
-        // unused tail stays from earlier frames; only quads * 6 vertices are drawn
-        // diagnostics: where the nearest wall point (straight out from the player) lands on screen at camera height
-        double[] near = toRender(mapping, cx + r * Math.cos(phi), cy + r * Math.sin(phi), origin);
+        double cp = Math.cos(phi), sp = Math.sin(phi);
+        double nearX = cx + r * cp, nearY = cy + r * sp;           // wall point straight out from the player
+        arcNear[0] = (float) (nearX - origin.x());
+        arcNear[1] = (float) (nearY - origin.y());
+        arcPhi[0] = (float) cp;
+        arcPhi[1] = (float) sp;
+        arcR = (float) r;
+        arcDa = (float) (2 * span / quads);
+        arcU0 = (float) ((r * (phi + Math.PI)) % 4096.0);
+        // diagnostics: where that nearest wall point lands on screen at camera height
+        double[] near = toRender(mapping, nearX, nearY, origin);
         lastNdc = ndc(view, proj, near[0], cam[1], near[1]);
         return quads;
     }
@@ -455,15 +525,6 @@ public final class BlueZoneWall {
         return d[0] * f[0] + d[1] * f[1];
     }
 
-    private int vert(int k, double[] p, float y, float u, float vv) {
-        verts[k] = (float) p[0];
-        verts[k + 1] = y;
-        verts[k + 2] = (float) p[1];
-        verts[k + 3] = u;
-        verts[k + 4] = vv;
-        return k + FLOATS_PER_VERT;
-    }
-
     private void stats(int quads, double[] blue, double[] cam) {
         if (quads > 0) drawnFrames++;
         long now = System.currentTimeMillis();
@@ -471,7 +532,7 @@ public final class BlueZoneWall {
         if (nextStat != 0) {
             double edge = Math.hypot(ZoneState.px - blue[0], ZoneState.py - blue[1]) - blue[2];
             log("wall frames drawn=" + drawnFrames + " skipped(far from edge)=" + skippedFar + " last quads=" + quads + " (last 10s)"
-                    + " edgeDist=" + f1(edge) + " axes=" + mapName(mapping) + (calibrated ? "(calibrated)" : "(default)")
+                    + " edgeDist=" + f1(edge) + " pixels=" + lastSamples + " axes=" + mapName(mapping) + (calibrated ? "(calibrated)" : "(default)")
                     + " headingDot=" + f2(lastFwdDot) + " nearestWallNdc=" + lastNdc
                     + " cam=(" + f1(cam[0]) + "," + f1(cam[1]) + "," + f1(cam[2]) + ")");
         }
