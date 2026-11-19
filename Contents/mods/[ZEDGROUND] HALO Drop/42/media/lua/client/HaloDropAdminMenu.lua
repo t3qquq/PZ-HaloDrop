@@ -1,6 +1,7 @@
 -- Halo Drop 어드민 메뉴: 월드 우클릭 -> 라운드 시작 / 종료
 -- 클라는 메뉴 표시만 거른다. 실제 권한 검사는 서버(HaloDropServer.lua onClientCommand)가 한다.
 -- B42 역할 이름은 소문자이고 isAccessLevel 은 대소문자를 무시한다.
+-- 다른 모드(Round Manager)가 HaloDrop.adminMenuHidden = true 를 세우면 이 메뉴는 숨는다.
 
 if isServer() then return end
 
@@ -18,6 +19,7 @@ end
 
 local function onFill(playerNum, context, worldobjects, test)
     local p = getSpecificPlayer(playerNum)
+    if HaloDrop.adminMenuHidden then return end
     if not p or not canUse(p) then return end
     if test then return ISWorldObjectContextMenu.setTest() end
     local C = HaloDrop.C

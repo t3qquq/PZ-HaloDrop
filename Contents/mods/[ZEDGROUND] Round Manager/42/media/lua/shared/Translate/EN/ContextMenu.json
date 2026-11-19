@@ -1,0 +1,19 @@
+{
+  "ContextMenu_RoundManager": "ZEDGROUND control",
+  "ContextMenu_RoundManager_ModOff": "This mod is not enabled on the server.",
+  "ContextMenu_RoundManager_HaloDrop": "Air drop",
+  "ContextMenu_RoundManager_HaloDrop_Start": "Start drop (route prep)",
+  "ContextMenu_RoundManager_HaloDrop_Launch": "Skip route prep and launch",
+  "ContextMenu_RoundManager_HaloDrop_Stop": "End drop",
+  "ContextMenu_RoundManager_BlueZone": "Containment zone",
+  "ContextMenu_RoundManager_BlueZone_Start": "Start containment",
+  "ContextMenu_RoundManager_BlueZone_Pause": "Pause",
+  "ContextMenu_RoundManager_BlueZone_Resume": "Resume",
+  "ContextMenu_RoundManager_BlueZone_NextPhase": "Next step (wait: start shrinking now, shrink: finish now)",
+  "ContextMenu_RoundManager_BlueZone_Stop": "Stop containment",
+  "ContextMenu_RoundManager_State": "Round state: %1",
+  "ContextMenu_RoundManager_State_Waiting": "waiting",
+  "ContextMenu_RoundManager_State_Running": "running",
+  "ContextMenu_RoundManager_State_SetWaiting": "Set to waiting",
+  "ContextMenu_RoundManager_State_SetRunning": "Set to running"
+}

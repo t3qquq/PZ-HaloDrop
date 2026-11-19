@@ -1,0 +1,19 @@
+{
+  "ContextMenu_RoundManager": "ZEDGROUND 운영",
+  "ContextMenu_RoundManager_ModOff": "이 모드가 서버에 켜져 있지 않습니다.",
+  "ContextMenu_RoundManager_HaloDrop": "공수 강하",
+  "ContextMenu_RoundManager_HaloDrop_Start": "강하 시작 (경로 준비)",
+  "ContextMenu_RoundManager_HaloDrop_Launch": "경로 준비 건너뛰고 출발",
+  "ContextMenu_RoundManager_HaloDrop_Stop": "강하 종료",
+  "ContextMenu_RoundManager_BlueZone": "봉쇄 구역",
+  "ContextMenu_RoundManager_BlueZone_Start": "봉쇄 시작",
+  "ContextMenu_RoundManager_BlueZone_Pause": "일시정지",
+  "ContextMenu_RoundManager_BlueZone_Resume": "재개",
+  "ContextMenu_RoundManager_BlueZone_NextPhase": "다음 구간 (대기 중이면 축소 시작, 축소 중이면 즉시 완료)",
+  "ContextMenu_RoundManager_BlueZone_Stop": "봉쇄 종료",
+  "ContextMenu_RoundManager_State": "판 상태: %1",
+  "ContextMenu_RoundManager_State_Waiting": "대기",
+  "ContextMenu_RoundManager_State_Running": "진행 중",
+  "ContextMenu_RoundManager_State_SetWaiting": "대기로 전환",
+  "ContextMenu_RoundManager_State_SetRunning": "진행 중으로 전환"
+}
