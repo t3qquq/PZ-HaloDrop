@@ -44,13 +44,3 @@ option HaloDrop.SkyView = {
     type = boolean, default = true,
     page = HaloDrop, translation = HaloDrop_SkyView,
 }
-
-option HaloDrop.SkyZoom = {
-    type = double, min = 6.0, max = 24.0, default = 14.0,
-    page = HaloDrop, translation = HaloDrop_SkyZoom,
-}
-
-option HaloDrop.SkyScale = {
-    type = double, min = 0.25, max = 8.0, default = 1.5,
-    page = HaloDrop, translation = HaloDrop_SkyScale,
-}

@@ -17,9 +17,5 @@
   "Sandbox_HaloDrop_OilRigOnly": "오일리그에서만 탑승",
   "Sandbox_HaloDrop_OilRigOnly_tooltip": "켜면 라운드 시작 때 오일리그(대기실)에 있는 사람만 수송기에 탄다. 끄면 접속자 전원이 어디에 있든 탄다. 차에 탄 사람과 죽은 사람은 어느 쪽이든 빠진다.",
   "Sandbox_HaloDrop_SkyView": "탑승 중 하늘 뷰",
-  "Sandbox_HaloDrop_SkyView_tooltip": "수송기 탑승 중에는 월드를 그리지 않고 지도 위의 기체를 보여줍니다 (비행 속도에선 클라이언트가 땅을 제때 못 받습니다).",
-  "Sandbox_HaloDrop_SkyZoom": "하늘 뷰 지도 줌",
-  "Sandbox_HaloDrop_SkyZoom_tooltip": "하늘 뷰가 쓰는 월드맵 줌 단계 (높을수록 가까이).",
-  "Sandbox_HaloDrop_SkyScale": "하늘 뷰 타일 배율 (칸당 px)",
-  "Sandbox_HaloDrop_SkyScale_tooltip": "하늘 뷰가 사진 타일을 그릴 때 월드 1칸이 화면 몇 px 인지. 낮을수록 높고 멀리 보인다."
+  "Sandbox_HaloDrop_SkyView_tooltip": "수송기 탑승 중에는 월드를 그리지 않고 지도 위의 기체를 보여줍니다 (비행 속도에선 클라이언트가 땅을 제때 못 받습니다)."
 }
