@@ -1,7 +1,7 @@
 -- Round Manager 운영 메뉴: 월드 우클릭 -> "ZEDGROUND 운영" 하나로 묶는다
+--   판 상태                : 대기 <-> 진행 중 (맨 위: 다른 조작의 전제)
 --   공수 강하 (HALO Drop)  : 시작 / 경로 준비 건너뛰고 출발 / 종료
 --   봉쇄 구역 (Blue Zone)  : 시작 / 일시정지·재개 / 다음 구간 / 종료
---   판 상태                : 대기 <-> 진행 중
 -- 명령은 각 모드 서버로 그대로 보낸다 (RoundManager.call). 권한 검사는 각 모드 서버가 한다.
 -- 대상 모드가 꺼져 있으면 그 항목은 비활성으로만 보인다.
 -- 이 메뉴가 있으면 각 모드의 자체 우클릭 메뉴는 숨긴다: 모드 전역 테이블에 adminMenuHidden = true 를 세운다.
@@ -118,8 +118,8 @@ local function onFill(playerNum, context, worldobjects, test)
     if not p or not canUse(p) then return end
     if test then return ISWorldObjectContextMenu.setTest() end
     local menu = addSub(context, getText("ContextMenu_RoundManager"))
+    fillState(menu, p)
     fillHaloDrop(menu, p)
     fillBlueZone(menu, p)
-    fillState(menu, p)
 end
 Events.OnFillWorldObjectContextMenu.Add(onFill)
