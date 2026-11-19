@@ -2,5 +2,10 @@
   "IGUI_ZedHUD_ZoneWait": "%1차 봉쇄 구역 축소까지 %2",
   "IGUI_ZedHUD_ZoneShrink": "%1차 봉쇄 구역 축소 중 %2",
   "IGUI_ZedHUD_ZoneDone": "봉쇄 구역 최종 축소 완료",
-  "IGUI_ZedHUD_ZonePaused": "(일시정지)"
+  "IGUI_ZedHUD_ZonePaused": "(일시정지)",
+  "IGUI_ZedHUD_ZoneShort": "%1차 %2",
+  "IGUI_ZedHUD_ZoneDoneShort": "최종",
+  "IGUI_ZedHUD_ZonePausedShort": "(정지)",
+  "IGUI_ZedHUD_ZoneNoticeWait": "%1차 봉쇄 구역 지정 · %2 후 축소",
+  "IGUI_ZedHUD_ZoneNoticeShrink": "%1차 봉쇄 구역 축소 시작"
 }

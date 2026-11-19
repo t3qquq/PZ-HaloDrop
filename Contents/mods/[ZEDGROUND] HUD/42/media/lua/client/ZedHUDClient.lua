@@ -48,7 +48,13 @@ local function createZone()
     z:addToUIManager()
     z:setAlwaysOnTop(false)
     ZedHUD.zone = z
-    ZedHUD.log("zone timer created (under the compass)")
+    local n = ZedHUDNotice:new(0)
+    n:initialise()
+    n:addToUIManager()
+    n:setAlwaysOnTop(false)
+    ZedHUD.notice = n
+    local layout = ZedHUD.timerLayout()
+    ZedHUD.log("zone timer created, layout=" .. tostring(layout) .. " (" .. (layout == ZedHUD.LAYOUT_PUBG and "pubg: above minimap + center notice" or "under the compass") .. ")")
 end
 
 local function onGameStart()
@@ -61,6 +67,7 @@ end
 local function onResolutionChange()
     if ZedHUD.compass then ZedHUD.compass:recenter() end
     if ZedHUD.zone then ZedHUD.zone:recenter() end
+    if ZedHUD.notice then ZedHUD.notice:recenter() end
 end
 
 Events.OnGameStart.Add(onGameStart)
