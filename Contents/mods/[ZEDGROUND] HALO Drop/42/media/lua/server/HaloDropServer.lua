@@ -285,18 +285,14 @@ local function jumpPlanesTick()
 end
 
 -- ── 탑승 구역 ─────────────────────────────────────────────────────────────────
--- 샌드박스 ZoneX1~ZoneX2, ZoneY1~ZoneY2 (월드 타일 좌표, 양끝 포함). X2 > X1 이고 Y2 > Y1 일 때만 켜진다.
--- 기본값 0 은 꺼짐 = 접속자 전원 탑승. 높이(z)는 보지 않는다 (오일리그는 여러 층).
+-- 샌드박스 OilRigOnly 가 켜져 있으면 오일리그(HaloDrop.OIL_RIG, HaloDropConfig.lua) 안에 있는 사람만 탄다.
+-- 꺼져 있으면 nil = 접속자 전원 탑승. 높이(z)는 보지 않는다 (오일리그는 여러 층).
 local function boardingZone()
-    local x1, y1 = HaloDrop.opt("ZoneX1"), HaloDrop.opt("ZoneY1")
-    local x2, y2 = HaloDrop.opt("ZoneX2"), HaloDrop.opt("ZoneY2")
-    if x2 > x1 and y2 > y1 then
-        return { x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
+    if not HaloDrop.opt("OilRigOnly") then
+        log("boarding: OilRigOnly off -> everyone online boards")
+        return nil
     end
-    if x1 ~= 0 or y1 ~= 0 or x2 ~= 0 or y2 ~= 0 then
-        log(string.format("boarding zone invalid (%d,%d)-(%d,%d): need X2>X1 and Y2>Y1, filter OFF", x1, y1, x2, y2))
-    end
-    return nil
+    return HaloDrop.OIL_RIG
 end
 
 local function inZone(zone, p)
