@@ -56,7 +56,9 @@ local function onClientCommand(module, command, player, args)
         state = s
         toClients("State", { state = state })
     elseif command == "Sync" then
+        log("sync from " .. who .. " -> " .. state)
         toPlayer(player, "State", { state = state })
     end
 end
 Events.OnClientCommand.Add(onClientCommand)
+log("server ready, state " .. state)

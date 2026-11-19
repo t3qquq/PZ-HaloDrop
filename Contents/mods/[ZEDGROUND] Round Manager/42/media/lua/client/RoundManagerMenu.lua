@@ -102,6 +102,7 @@ end
 
 local function fillState(menu, p)
     local cur = RM.state
+    if cur == nil then RM.requestSync("menu") end   -- 아직 모르면 열 때마다 다시 묻는다
     local curText = cur == RM.STATE.RUNNING and getText("ContextMenu_RoundManager_State_Running")
         or cur == RM.STATE.WAITING and getText("ContextMenu_RoundManager_State_Waiting")
         or "?"
