@@ -29,7 +29,12 @@ import static org.lwjgl.opengl.GL33.*;
  * a vertical band from camera height - BELOW to + ABOVE. There is no vertex buffer: the vertex shader builds the arc
  * from gl_VertexID and a few uniforms (nearest wall point, radius, angle step), relative to the nearest wall point so
  * 32-bit floats stay exact for circles thousands of tiles wide.
- * Look (0.2.0, 11-19): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
+ * Look: sandbox BlueZone.Style (read by ZoneState, the server's value reaches every client).
+ *   1 field (0.2.0): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
+ *   2 gas (0.5.0): contaminated zone - slow rolling green gas, thicker near the ground, no lightning. One sheet would
+ *     read as a flat green curtain, so GAS_LAYERS sheets are drawn GAS_GAP tiles apart (outward, far one first) with
+ *     different noise so the edge has some depth. It is still sheets, not a volume: inside the zone the screen tint
+ *     (BlueZoneDisplay.lua) carries the haze.
  *
  * Axes (0.3.1, 11-19): FrameView.view() is relative to FrameView.sceneOrigin(), and sceneOrigin is in PZ world
  * coordinates (x tile, y tile, floor level). Render (x, z) = +-(world x - origin.x), +-(world y - origin.y), height is
@@ -48,7 +53,10 @@ public final class BlueZoneWall {
     static final int DEFAULT_MAP = 6;        // render x = -(world dx), render z = -(world dy)
     static final int CAL_SAMPLES = 40;       // frames of camera heading used to check the axis mapping
     static final long YAW_MAX_AGE_MS = 150L; // Lua's camera yaw older than this is not used
-    static final float[] COLOR = { 0.12f, 0.38f, 1.00f, 0.42f };   // rgb = haze tint, a = base opacity
+    static final float[] COLOR = { 0.12f, 0.38f, 1.00f, 0.42f };   // field: rgb = haze tint, a = base opacity
+    static final float[] GAS_COLOR = { 0.34f, 0.78f, 0.16f, 0.26f }; // gas: rgb = bright part of the cloud, a = base opacity
+    static final int GAS_LAYERS = 3;
+    static final float GAS_GAP = 6f;         // tiles between gas sheets (outward from the circle)
 
     static final int VERTS_PER_QUAD = 6;
 
@@ -65,6 +73,7 @@ public final class BlueZoneWall {
             "uniform vec4 uMap;\n" +       // render x = uMap.x * wx + uMap.y * wy, render z = uMap.z * wx + uMap.w * wy
             "uniform vec4 uY;\n" +         // x = wall bottom, y = top (render y)
             "uniform float uU0;\n" +       // tiles along the circle at the nearest point (keeps the pattern fixed in the world)
+            "uniform float uOff;\n" +      // tiles this sheet sits outside the circle (gas layers)
             "out vec2 vUV;\n" +
             "const vec2 CORNER[6] = vec2[6](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0));\n" +
             "void main() {\n" +
@@ -75,6 +84,7 @@ public final class BlueZoneWall {
             "    float h = sin(d * 0.5);\n" +
             "    float cm1 = -2.0 * h * h;\n" +                       // cos(d) - 1 without cancellation
             "    vec2 w = uNear.xy + uR * vec2(uPhi.x * cm1 - uPhi.y * s, uPhi.y * cm1 + uPhi.x * s);\n" +
+            "    w += uOff * vec2(uPhi.x * (1.0 + cm1) - uPhi.y * s, uPhi.y * (1.0 + cm1) + uPhi.x * s);\n" +
             "    vec3 p = vec3(uMap.x * w.x + uMap.y * w.y, mix(uY.x, uY.y, c.y), uMap.z * w.x + uMap.w * w.y);\n" +
             "    vUV = vec2(uU0 + uR * d, c.y);\n" +
             "    gl_Position = uProj * uView * vec4(p, 1.0);\n" +
@@ -85,6 +95,8 @@ public final class BlueZoneWall {
             "in vec2 vUV;\n" +
             "uniform vec4 uColor;\n" +
             "uniform float uTime;\n" +
+            "uniform float uStyle;\n" +    // 1 field, 2 gas
+            "uniform float uSeed;\n" +     // gas sheet number
             "out vec4 fragColor;\n" +
             "float hash(float n) { return fract(sin(n) * 43758.5453); }\n" +
             "float noise(vec2 p) {\n" +
@@ -94,6 +106,20 @@ public final class BlueZoneWall {
             "}\n" +
             "void main() {\n" +
             "    float u = vUV.x; float v = vUV.y;\n" +
+            "    if (uStyle > 1.5) {\n" +
+            "        float sd = uSeed * 37.0;\n" +
+            "        float h = v * 200.0;\n" +                              // height in render units (the wall is BELOW + ABOVE tall)
+            "        float n = noise(vec2(u * 0.035 + sd, h * 0.035 - uTime * 0.05)) * 0.50\n" +
+            "                + noise(vec2(u * 0.09 - uTime * 0.06 + sd * 0.7, h * 0.09 - uTime * 0.11)) * 0.32\n" +
+            "                + noise(vec2(u * 0.27 + uTime * 0.09, h * 0.27 - uTime * 0.22 + sd)) * 0.18;\n" +
+            "        float puff = smoothstep(0.30, 0.72, n);\n" +
+            "        float low = 1.0 - smoothstep(0.30, 0.95, v);\n" +       // thicker near the ground (v 0.3 is about camera height)
+            "        float fade = smoothstep(0.0, 0.05, v) * (1.0 - smoothstep(0.70, 1.0, v));\n" +
+            "        vec3 c = mix(uColor.rgb * 0.30, uColor.rgb * 1.10 + vec3(0.10, 0.08, 0.0), n);\n" +
+            "        float a = (uColor.a + 0.50 * puff) * (0.45 + 0.55 * low) * fade;\n" +
+            "        fragColor = vec4(c, clamp(a, 0.0, 0.85));\n" +
+            "        return;\n" +
+            "    }\n" +
             "    float fade = smoothstep(0.0, 0.04, v) * (1.0 - smoothstep(0.80, 1.0, v));\n" +
             "    float haze = noise(vec2(u * 0.12, v * 5.0 - uTime * 0.5)) * 0.6\n" +
             "               + noise(vec2(u * 0.45, v * 18.0 - uTime * 1.4)) * 0.4;\n" +
@@ -111,7 +137,8 @@ public final class BlueZoneWall {
     private static final BlueZoneWall INSTANCE = new BlueZoneWall();
 
     private int program, vao;
-    private int uView, uProj, uNear, uPhi, uR, uDa, uQuads, uMap, uY, uU0, uColor, uTime;
+    private int uView, uProj, uNear, uPhi, uR, uDa, uQuads, uMap, uY, uU0, uOff, uColor, uTime, uStyle, uSeed;
+    private int lastStyle = -1;
     private boolean broken;
     private int errors;
 
@@ -221,10 +248,14 @@ public final class BlueZoneWall {
         uU0 = glGetUniformLocation(p, "uU0");
         uColor = glGetUniformLocation(p, "uColor");
         uTime = glGetUniformLocation(p, "uTime");
+        uOff = glGetUniformLocation(p, "uOff");
+        uStyle = glGetUniformLocation(p, "uStyle");
+        uSeed = glGetUniformLocation(p, "uSeed");
         if (vao == 0) vao = glGenVertexArrays();
         program = p;
         log("gl ready: program " + p + " vao " + vao + " uniforms view=" + uView + " proj=" + uProj + " near=" + uNear + " phi=" + uPhi
-                + " r=" + uR + " da=" + uDa + " quads=" + uQuads + " map=" + uMap + " y=" + uY + " u0=" + uU0 + " color=" + uColor + " time=" + uTime);
+                + " r=" + uR + " da=" + uDa + " quads=" + uQuads + " map=" + uMap + " y=" + uY + " u0=" + uU0 + " color=" + uColor + " time=" + uTime
+                + " off=" + uOff + " style=" + uStyle + " seed=" + uSeed);
     }
 
     // ── axis mapping ───────────────────────────────────────────
@@ -403,11 +434,24 @@ public final class BlueZoneWall {
                 glUniform4f(uMap, mm[0], mm[1], mm[2], mm[3]);
                 glUniform4f(uY, (float) (cam[1] - BELOW), (float) (cam[1] + ABOVE), 0f, 0f);
                 glUniform1f(uU0, arcU0);
-                glUniform4f(uColor, COLOR[0], COLOR[1], COLOR[2], COLOR[3]);
+                int style = ZoneState.style;
+                boolean gas = style == 2;
+                float[] col = gas ? GAS_COLOR : COLOR;
+                glUniform4f(uColor, col[0], col[1], col[2], col[3]);
                 glUniform1f(uTime, (float) (v.seconds() % 1000.0));
+                glUniform1f(uStyle, gas ? 2f : 1f);
+                if (style != lastStyle) {
+                    lastStyle = style;
+                    log("wall style " + style + (gas ? " (gas, " + GAS_LAYERS + " sheets " + GAS_GAP + " tiles apart)" : " (field)"));
+                }
 
                 boolean counting = beginSamples();
-                glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
+                int layers = gas ? GAS_LAYERS : 1;
+                for (int layer = layers - 1; layer >= 0; layer--) {       // far sheet first (seen from inside the zone)
+                    glUniform1f(uOff, layer * GAS_GAP);
+                    glUniform1f(uSeed, layer);
+                    glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
+                }
                 if (counting) endSamples();
                 if (!firstDrawLogged) {
                     firstDrawLogged = true;

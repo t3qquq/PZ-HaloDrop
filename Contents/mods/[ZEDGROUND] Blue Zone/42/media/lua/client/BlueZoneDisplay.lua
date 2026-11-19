@@ -18,7 +18,6 @@ require "ISUI/Maps/ISMiniMap"
 local B = BlueZone
 
 local D = {
-    BLUE  = { r = 0.25, g = 0.50, b = 1.00, a = 0.95 },
     WHITE = { r = 1.00, g = 1.00, b = 1.00, a = 0.95 },
     -- 아이소 땅 위 선
     WORLD_SHOW_RANGE = 120,   -- 경계에서 이 거리(타일) 안에 있을 때만 그린다
@@ -28,11 +27,9 @@ local D = {
     -- 지도
     MAP_SEGMENTS = 128,
     MAP_THICK    = 2,
-    -- 지도·미니맵에서 파란 원 바깥 전체를 덮는 색 (배그 지도처럼 원 밖을 통째로 칠한다)
-    MAP_FILL = { r = 0.10, g = 0.25, b = 0.90, a = 0.35 },
+    -- 지도·미니맵에서 파란 원 바깥 전체를 덮는다 (배그 지도처럼 원 밖을 통째로 칠한다). 색은 BlueZone.style().fill
     MAP_FILL_SEGMENTS = 128,
-    -- 틴트: 경계 밖 깊이(타일)에 비례해 MIN_A ~ MAX_A
-    TINT = { r = 0.10, g = 0.25, b = 0.85 },
+    -- 틴트: 경계 밖 깊이(타일)에 비례해 MIN_A ~ MAX_A. 색은 BlueZone.style().tint
     TINT_MIN_A = 0.12,
     TINT_MAX_A = 0.40,
     TINT_DEPTH = 60,
@@ -41,6 +38,17 @@ local D = {
 B.DISPLAY = D
 
 local function log(msg) B.log(msg) end
+
+-- 파란 원·채우기·틴트 색은 연출 방식(샌드박스 BlueZone.Style)에서 온다: BlueZone.STYLES (BlueZoneConfig.lua)
+local _styleLogged = nil
+local function style()
+    local s = B.style()
+    if s.name ~= _styleLogged then
+        _styleLogged = s.name
+        log("display: style " .. tostring(B.opt("Style")) .. " (" .. s.name .. ")")
+    end
+    return s
+end
 
 -- ── 시점 판정 ────────────────────────────────────────────
 -- Viewpoint.View.next() 는 "다음 시점 이름": "first" 면 지금 아이소다. 전역이 없으면 아이소.
@@ -130,7 +138,7 @@ local function drawTint(p, cx, cy, r)
     local k = depth / D.TINT_DEPTH
     if k > 1 then k = 1 end
     local a = D.TINT_MIN_A + (D.TINT_MAX_A - D.TINT_MIN_A) * k
-    local t = D.TINT
+    local t = style().tint
     getRenderer():renderi(nil, 0, 0, getCore():getScreenWidth(), getCore():getScreenHeight(), t.r, t.g, t.b, a, nil)
 end
 
@@ -142,7 +150,7 @@ local function onPreUIDraw()
     local cx, cy, r = B.currentBlue()
     if not viewpointActive() then
         if C.wr >= 0 then drawWorldArc(0, p, C.wx, C.wy, C.wr, D.WHITE) end
-        if cx then drawWorldArc(0, p, cx, cy, r, D.BLUE) end
+        if cx then drawWorldArc(0, p, cx, cy, r, style().line) end
     elseif cx then
         publishCamera()   -- 벽을 그리는 동안만 (파란 원 활성 + Viewpoint 시점)
     end
@@ -209,9 +217,9 @@ local function drawMapCircles(ui, tag)
     local C = B.C
     if not C or not ui.mapAPI then return end
     local cx, cy, r = B.currentBlue()
-    if cx then drawMapOutside(ui, ui.mapAPI, cx, cy, r, D.MAP_FILL, tag) end
+    if cx then drawMapOutside(ui, ui.mapAPI, cx, cy, r, style().fill, tag) end
     if C.wr >= 0 then drawMapCircle(ui, ui.mapAPI, C.wx, C.wy, C.wr, D.WHITE) end
-    if cx then drawMapCircle(ui, ui.mapAPI, cx, cy, r, D.BLUE) end
+    if cx then drawMapCircle(ui, ui.mapAPI, cx, cy, r, style().line) end
 end
 
 local _origWorldMapRender = ISWorldMap.render

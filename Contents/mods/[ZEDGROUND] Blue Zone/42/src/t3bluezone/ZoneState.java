@@ -15,6 +15,7 @@ import java.lang.reflect.Method;
  * Player: IsoPlayer.getInstance() x / y, used to pick the arc near the player.
  * Camera: BlueZone.VP { yaw, at } (BlueZoneDisplay.lua, Viewpoint's eye yaw in world atan2(dy, dx) degrees and the
  * getTimestampMs it was read at), used by BlueZoneWall to check its axis mapping. NaN when Lua has not sent one.
+ * Style: SandboxVars.BlueZone.Style (enum 1 field / 2 gas), read every frame so an admin change shows at once.
  * Everything is reached by reflection (Kahlua table / game classes), so the jar needs no game jar to build.
  */
 public final class ZoneState {
@@ -30,6 +31,7 @@ public final class ZoneState {
     static boolean hasPlayer;
     static double camYaw = Double.NaN;
     static long camYawAt;
+    static int style = 1;   // sandbox BlueZone.Style: 1 field (blue, lightning), 2 gas (green)
 
     private static void fail(String where, Throwable t) {
         errors++;
@@ -87,6 +89,8 @@ public final class ZoneState {
             double yaw = num(vp, "yaw"), at = num(vp, "at");
             camYaw = yaw;
             camYawAt = Double.isNaN(at) ? 0L : (long) at;
+            double st = num(get(get(fEnv.get(null), "SandboxVars"), "BlueZone"), "Style");
+            if (!Double.isNaN(st)) style = (int) st;
             Object c = get(bz, "C");
             if (c == null) { note("no round"); return null; }
             double phase = num(c, "phase");

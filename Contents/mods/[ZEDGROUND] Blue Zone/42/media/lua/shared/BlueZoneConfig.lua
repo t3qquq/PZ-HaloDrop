@@ -58,6 +58,26 @@ function BlueZone.opt(name)
     return SandboxVars.BlueZone[name]
 end
 
+-- 연출 방식 (샌드박스 BlueZone.Style, enum). 서버 값이 전 클라에 동기화되므로 전원이 같은 모습을 본다.
+--   1 field: 배그식 전자기장 (파랑, 번개 줄기)   2 gas: 화생방 오염 구역 (초록 독가스)
+-- 색만 여기서 정한다. Viewpoint 벽 모양은 클라 자바(src/t3bluezone/BlueZoneWall)가 같은 샌드박스 값을 읽어 고른다.
+--   line   : 지도·미니맵 원 선, 아이소 땅 위 선      fill: 지도·미니맵 원 바깥 채우기
+--   tint   : 구역 밖 화면 색                          hud / hudFill: HUD 타이머 글자 / 진행 막대 (ZEDGROUND HUD 가 읽는다)
+BlueZone.STYLES = {
+    { name = "field",
+      line = { r = 0.25, g = 0.50, b = 1.00, a = 0.95 }, fill = { r = 0.10, g = 0.25, b = 0.90, a = 0.35 },
+      tint = { r = 0.10, g = 0.25, b = 0.85 },
+      hud  = { r = 0.45, g = 0.70, b = 1.00 }, hudFill = { r = 0.25, g = 0.50, b = 1.00, a = 0.95 } },
+    { name = "gas",
+      line = { r = 0.45, g = 0.95, b = 0.25, a = 0.95 }, fill = { r = 0.22, g = 0.55, b = 0.08, a = 0.38 },
+      tint = { r = 0.28, g = 0.55, b = 0.08 },
+      hud  = { r = 0.62, g = 0.95, b = 0.40 }, hudFill = { r = 0.40, g = 0.85, b = 0.20, a = 0.95 } },
+}
+
+function BlueZone.style()
+    return BlueZone.STYLES[BlueZone.opt("Style")]
+end
+
 -- 초 -> ms. kind: "wait"(지연·대기, WaitScale) / "shrink"(축소, ShrinkScale)
 function BlueZone.durMs(sec, kind)
     local scale = kind == "shrink" and BlueZone.opt("ShrinkScale") or BlueZone.opt("WaitScale")

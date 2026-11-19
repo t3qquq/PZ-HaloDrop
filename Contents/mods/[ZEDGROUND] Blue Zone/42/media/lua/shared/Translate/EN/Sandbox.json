@@ -1,5 +1,9 @@
 {
   "Sandbox_BlueZone": "Containment zone (Blue Zone)",
+  "Sandbox_BlueZone_Style": "Look",
+  "Sandbox_BlueZone_Style_tooltip": "How the zone looks: the wall (Viewpoint 1st/3rd person), the map and minimap colour, the screen tint outside the zone and the HUD timer colour. Damage and timing stay the same.",
+  "Sandbox_BlueZone_Style_option1": "Energy field (blue)",
+  "Sandbox_BlueZone_Style_option2": "Contaminated zone (green gas)",
   "Sandbox_BlueZone_WaitScale": "Wait time scale",
   "Sandbox_BlueZone_WaitScale_tooltip": "Multiplies every phase wait (white circle shown, wall still). For looting time. 1.0 = about 74 min per round, 1.6 = about 2 hours. 0.1 for testing.",
   "Sandbox_BlueZone_ShrinkScale": "Shrink time scale",

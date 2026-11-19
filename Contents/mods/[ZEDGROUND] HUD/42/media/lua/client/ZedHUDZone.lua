@@ -75,7 +75,7 @@ end
 -- 1 = 나침반 아래 한 줄
 function ZedHUDZone:renderCompassLayout(phase, seg, paused)
     local z = ZedHUD.ZONE
-    local col = seg == "shrink" and z.shrink or z.wait
+    local col = seg == "shrink" and ZedHUD.zoneShrinkColor() or z.wait
     local text
     if seg == "done" then
         text = getText("IGUI_ZedHUD_ZoneDone")
@@ -120,7 +120,7 @@ end
 function ZedHUDZone:renderPubgLayout(phase, seg, paused, p)
     local P, z = ZedHUD.PUBG, ZedHUD.ZONE
     local w = self.width
-    local col = seg == "shrink" and z.shrink or z.wait
+    local col = seg == "shrink" and ZedHUD.zoneShrinkColor() or z.wait
     local text
     if seg == "done" then
         text = getText("IGUI_ZedHUD_ZoneDoneShort")
@@ -136,7 +136,8 @@ function ZedHUDZone:renderPubgLayout(phase, seg, paused, p)
     local by = getTextManager():getFontHeight(UIFont.Medium) + P.textGap + math.floor(P.markOver / 2)
     self:drawRect(0, by, w, P.barH, P.track.a, P.track.r, P.track.g, P.track.b)
     if fill > 0 then
-        self:drawRect(0, by, math.floor(w * fill), P.barH, P.fill.a, P.fill.r, P.fill.g, P.fill.b)
+        local fc = ZedHUD.zoneFillColor()
+        self:drawRect(0, by, math.floor(w * fill), P.barH, fc.a, fc.r, fc.g, fc.b)
     end
     -- 오른쪽 끝 = 다음 봉쇄 구역 경계
     self:drawRect(w - 2, by - P.markOver / 2, 2, P.barH + P.markOver, 1, 1, 1, 1)
@@ -239,7 +240,7 @@ function ZedHUDNotice:render()
     local left = self.until_ - now
     local a = 1
     if left < ZedHUD.PUBG.noticeFade then a = left / ZedHUD.PUBG.noticeFade end
-    local col = seg == "shrink" and ZedHUD.ZONE.shrink or ZedHUD.ZONE.wait
+    local col = seg == "shrink" and ZedHUD.zoneShrinkColor() or ZedHUD.ZONE.wait
     local fh = getTextManager():getFontHeight(UIFont.Large)
     self:drawRect(0, 0, self.width, self.height, 0.45 * a, 0, 0, 0)
     self:drawTextCentre(self.text, self.width / 2, math.floor((self.height - fh) / 2), col.r, col.g, col.b, a, UIFont.Large)

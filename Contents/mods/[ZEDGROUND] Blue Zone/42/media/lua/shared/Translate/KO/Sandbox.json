@@ -1,5 +1,9 @@
 {
   "Sandbox_BlueZone": "봉쇄 구역 (Blue Zone)",
+  "Sandbox_BlueZone_Style": "연출 방식",
+  "Sandbox_BlueZone_Style_tooltip": "봉쇄 구역의 겉모습. 벽(Viewpoint 1·3인칭), 지도·미니맵 색, 구역 밖 화면 색, HUD 타이머 색이 같이 바뀐다. 데미지·시간은 그대로다.",
+  "Sandbox_BlueZone_Style_option1": "전자기장 (파랑)",
+  "Sandbox_BlueZone_Style_option2": "오염 구역 (초록 독가스)",
   "Sandbox_BlueZone_WaitScale": "대기 시간 배율",
   "Sandbox_BlueZone_WaitScale_tooltip": "각 페이즈 대기(흰 원 표시, 벽 정지) 시간에 곱한다. 파밍 시간 조절용. 1.0 = 판 약 74분, 1.6 이면 약 2시간(1판만 하는 날). 테스트는 0.1.",
   "Sandbox_BlueZone_ShrinkScale": "축소 시간 배율",

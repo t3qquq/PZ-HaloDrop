@@ -41,6 +41,18 @@ ZedHUD.ZONE = {
     shrink  = { r = 0.45, g = 0.70, b = 1.00 },   -- 축소 중: 파란색
 }
 
+-- 축소 중 글자 색 / 진행 막대 색. Blue Zone 의 연출 방식(샌드박스 BlueZone.Style: 전자기장 파랑 / 오염 구역 초록)을 따른다.
+-- Blue Zone 이 없거나 구버전이면 위·아래 표의 기본 파란색
+function ZedHUD.zoneShrinkColor()
+    if BlueZone and BlueZone.style then return BlueZone.style().hud end
+    return ZedHUD.ZONE.shrink
+end
+
+function ZedHUD.zoneFillColor()
+    if BlueZone and BlueZone.style then return BlueZone.style().hudFill end
+    return ZedHUD.PUBG.fill
+end
+
 -- 2 = 배그식. 미니맵 바로 위, 미니맵과 같은 폭 (미니맵이 없거나 꺼져 있으면 화면 오른쪽 아래, fallbackWidth)
 --   막대: 미니맵 가로 길이 전체. 오른쪽 끝 = 다음 봉쇄 구역(흰 원) 경계, 플레이어 표시 = 남은 거리 비율,
 --         파란 채움 = 이번 축소 진행률(대기 중엔 0). 거리 숫자는 표시하지 않는다 (11-19 t3)
