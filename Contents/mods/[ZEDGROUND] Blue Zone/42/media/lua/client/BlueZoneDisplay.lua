@@ -1,4 +1,4 @@
--- Blue Zone 표시 (클라): 아이소 땅 위 원 둘레 선 / 월드맵·미니맵 원 / 자기장 밖 화면 틴트
+-- Blue Zone 표시 (클라): 아이소 땅 위 원 둘레 선 / 월드맵·미니맵 원 + 파란 원 바깥 채우기 / 자기장 밖 화면 틴트
 --
 -- 바닐라 API 만 쓴다 (선행 모드 없음).
 -- 시점별
@@ -28,6 +28,9 @@ local D = {
     -- 지도
     MAP_SEGMENTS = 128,
     MAP_THICK    = 2,
+    -- 지도·미니맵에서 파란 원 바깥 전체를 덮는 색 (배그 지도처럼 원 밖을 통째로 칠한다)
+    MAP_FILL = { r = 0.10, g = 0.25, b = 0.90, a = 0.35 },
+    MAP_FILL_SEGMENTS = 128,
     -- 틴트: 경계 밖 깊이(타일)에 비례해 MIN_A ~ MAX_A
     TINT = { r = 0.10, g = 0.25, b = 0.85 },
     TINT_MIN_A = 0.12,
@@ -165,18 +168,56 @@ local function drawMapCircle(ui, mapAPI, cx, cy, r, c)
     end
 end
 
-local function drawMapCircles(ui)
+-- 파란 원 바깥 채우기: 원 둘레에서 바깥 반지름까지 사각형을 고리 모양으로 이어 붙인다.
+-- 바깥 반지름은 지도 요소 네 모서리 중 원 중심에서 가장 먼 곳보다 크게 잡아, 지금 보이는 범위에서 원 밖은 전부 덮인다.
+-- 보이는 범위 전체가 원 안이면(시작 직후의 큰 원 등) 아무것도 그리지 않는다.
+-- drawPolygon 은 바닐라 ISWorldMap 이 텍스처 nil 로 쓰는 것과 같은 호출 (UIElement.DrawPolygon -> SpriteRenderer.renderPoly)
+local _fillLogged = {}
+local function drawMapOutside(ui, mapAPI, cx, cy, r, c, tag)
+    if r <= 0 or not ui.javaObject then return end
+    local w, h = ui:getWidth(), ui:getHeight()
+    local far = 0
+    for i = 0, 3 do
+        local ux = (i == 1 or i == 2) and w or 0
+        local uy = (i >= 2) and h or 0
+        local dx = mapAPI:uiToWorldX(ux, uy) - cx
+        local dy = mapAPI:uiToWorldY(ux, uy) - cy
+        local d = math.sqrt(dx * dx + dy * dy)
+        if d > far then far = d end
+    end
+    if far <= r then return end
+    local n = D.MAP_FILL_SEGMENTS
+    local da = 2 * math.pi / n
+    local outer = far * 1.05 / math.cos(da / 2)   -- 바깥 고리의 현이 far 안쪽으로 파고들지 않게
+    local ix1, iy1 = mapAPI:worldToUIX(cx + r, cy), mapAPI:worldToUIY(cx + r, cy)
+    local ox1, oy1 = mapAPI:worldToUIX(cx + outer, cy), mapAPI:worldToUIY(cx + outer, cy)
+    for i = 1, n do
+        local a = da * i
+        local ca, sa = math.cos(a), math.sin(a)
+        local ix2, iy2 = mapAPI:worldToUIX(cx + r * ca, cy + r * sa), mapAPI:worldToUIY(cx + r * ca, cy + r * sa)
+        local ox2, oy2 = mapAPI:worldToUIX(cx + outer * ca, cy + outer * sa), mapAPI:worldToUIY(cx + outer * ca, cy + outer * sa)
+        ui:drawPolygon(nil, ix1, iy1, ix2, iy2, ox2, oy2, ox1, oy1, c.r, c.g, c.b, c.a)
+        ix1, iy1, ox1, oy1 = ix2, iy2, ox2, oy2
+    end
+    if not _fillLogged[tag] then
+        _fillLogged[tag] = true
+        log(string.format("display: %s outside fill first drawn (ui=%.0fx%.0f blue r%.0f, filled out to r%.0f)", tag, w, h, r, outer))
+    end
+end
+
+local function drawMapCircles(ui, tag)
     local C = B.C
     if not C or not ui.mapAPI then return end
-    if C.wr >= 0 then drawMapCircle(ui, ui.mapAPI, C.wx, C.wy, C.wr, D.WHITE) end
     local cx, cy, r = B.currentBlue()
+    if cx then drawMapOutside(ui, ui.mapAPI, cx, cy, r, D.MAP_FILL, tag) end
+    if C.wr >= 0 then drawMapCircle(ui, ui.mapAPI, C.wx, C.wy, C.wr, D.WHITE) end
     if cx then drawMapCircle(ui, ui.mapAPI, cx, cy, r, D.BLUE) end
 end
 
 local _origWorldMapRender = ISWorldMap.render
 function ISWorldMap:render()
     _origWorldMapRender(self)
-    drawMapCircles(self)
+    drawMapCircles(self, "world map")
 end
 
 -- 미니맵 안쪽은 render 를 따로 정의하지 않아 ISUIElement.render 를 물려받는다. 테두리 밖으로 안 나가게 스텐실로 자른다
@@ -185,8 +226,8 @@ function ISMiniMapInner:render()
     _origMiniInnerRender(self)
     if not B.C then return end
     self:setStencilRect(0, 0, self:getWidth(), self:getHeight())
-    drawMapCircles(self)
+    drawMapCircles(self, "minimap")
     self:clearStencilRect()
 end
 
-log("display: loaded (white+blue world line in iso only, map/minimap circles, outside tint; start blue covers the whole area)")
+log("display: loaded (white+blue world line in iso only, map/minimap circles + blue fill outside the blue circle, outside tint; start blue covers the whole area)")
