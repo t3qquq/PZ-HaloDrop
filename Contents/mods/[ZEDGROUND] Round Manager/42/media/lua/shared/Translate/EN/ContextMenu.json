@@ -1,5 +1,6 @@
 {
   "ContextMenu_RoundManager": "ZEDGROUND control",
+  "ContextMenu_RoundManager_TeleportRig": "Go to oil rig spawn (me only)",
   "ContextMenu_RoundManager_ModOff": "This mod is not enabled on the server.",
   "ContextMenu_RoundManager_HaloDrop": "HALO Drop",
   "ContextMenu_RoundManager_HaloDrop_Start": "Start drop (route prep)",

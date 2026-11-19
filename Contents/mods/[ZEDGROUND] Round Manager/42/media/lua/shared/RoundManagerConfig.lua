@@ -24,6 +24,11 @@ RoundManager.TARGETS = {
     BlueZone = { global = "BlueZone",  commands = { "Start", "Pause", "Resume", "NextPhase", "Stop" } },
 }
 
+-- 오일리그(대기실) 스폰 지점. [ZEDGROUND] Oil Rig Map 의 maps/OilRig/spawnpoints.lua 와 같은 값 (상부 갑판, z4)
+-- 칸 가운데에 서도록 +0.5. 맵 모드 id 는 t3OilRig (켜져 있을 때만 이동 메뉴를 쓴다)
+RoundManager.OIL_RIG_MOD = "t3OilRig"
+RoundManager.OIL_RIG_SPAWN = { x = 19213.5, y = 272.5, z = 4 }
+
 function RoundManager.log(msg)
     print("[RoundManager] " .. tostring(msg))
 end

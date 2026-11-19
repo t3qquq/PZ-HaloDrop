@@ -2,6 +2,7 @@
 --   판 상태                : 대기 <-> 진행 중 (맨 위: 다른 조작의 전제)
 --   공수 강하 (HALO Drop)  : 시작 / 경로 준비 건너뛰고 출발 / 종료
 --   봉쇄 구역 (Blue Zone)  : 시작 / 일시정지·재개 / 다음 구간 / 종료
+--   오일리그로 이동        : 누른 관리자 자기 캐릭터만 대기실 스폰 지점으로 (다른 플레이어는 그대로)
 -- 명령은 각 모드 서버로 그대로 보낸다 (RoundManager.call). 권한 검사는 각 모드 서버가 한다.
 -- 대상 모드가 꺼져 있으면 그 항목은 비활성으로만 보인다.
 -- 이 메뉴가 있으면 각 모드의 자체 우클릭 메뉴는 숨긴다: 모드 전역 테이블에 adminMenuHidden = true 를 세운다.
@@ -113,6 +114,32 @@ local function fillState(menu, p)
     end
 end
 
+-- 오일리그 맵 모드가 켜져 있나. getActivatedMods() 는 mod.info id 목록인데 B42 표기에 역슬래시가 붙는지 불확실해 둘 다 본다
+local function oilRigActive()
+    local mods = getActivatedMods()
+    if not mods then return false end
+    return mods:contains(RM.OIL_RIG_MOD) or mods:contains("\\" .. RM.OIL_RIG_MOD)
+end
+
+-- 이동은 바닐라 관리자 지도 텔레포트와 같은 경로: MP 는 서버 채팅 명령 /teleportto (TeleportToCoordinates 권한,
+-- 서버가 속도 안티치트 유예까지 처리), SP 는 teleportTo. 명령을 보낸 본인만 움직인다
+local function onTeleportRig(p)
+    local s = RM.OIL_RIG_SPAWN
+    log(string.format("menu -> teleport %s to oil rig spawn (%.1f,%.1f,%d) from (%.1f,%.1f,%d)",
+        tostring(p:getUsername()), s.x, s.y, s.z, p:getX(), p:getY(), math.floor(p:getZ())))
+    if isClient() then
+        SendCommandToServer(string.format("/teleportto %s,%s,%d", tostring(s.x), tostring(s.y), s.z))
+    else
+        p:teleportTo(s.x, s.y, s.z)
+    end
+end
+
+local function fillTeleport(menu, p)
+    local label = getText("ContextMenu_RoundManager_TeleportRig")
+    if not oilRigActive() then addOff(menu, label) return end
+    menu:addOption(label, p, onTeleportRig)
+end
+
 local function onFill(playerNum, context, worldobjects, test)
     local p = getSpecificPlayer(playerNum)
     if not p or not canUse(p) then return end
@@ -121,5 +148,6 @@ local function onFill(playerNum, context, worldobjects, test)
     fillState(menu, p)
     fillHaloDrop(menu, p)
     fillBlueZone(menu, p)
+    fillTeleport(menu, p)
 end
 Events.OnFillWorldObjectContextMenu.Add(onFill)

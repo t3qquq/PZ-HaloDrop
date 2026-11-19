@@ -1,5 +1,6 @@
 {
   "ContextMenu_RoundManager": "ZEDGROUND 운영",
+  "ContextMenu_RoundManager_TeleportRig": "오일리그 스폰 지점으로 이동 (나만)",
   "ContextMenu_RoundManager_ModOff": "이 모드가 서버에 켜져 있지 않습니다.",
   "ContextMenu_RoundManager_HaloDrop": "공수 강하",
   "ContextMenu_RoundManager_HaloDrop_Start": "강하 시작 (경로 준비)",
