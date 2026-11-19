@@ -31,6 +31,7 @@ import static org.lwjgl.opengl.GL33.*;
  * 32-bit floats stay exact for circles thousands of tiles wide.
  * Look: sandbox BlueZone.Style (read by ZoneState, the server's value reaches every client).
  *   1 field (0.2.0): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
+ *   2 gas (0.7.0): near the camera the gas is billboard puffs (see PUFF_RANGE), the shells below are the far backdrop.
  *   2 gas (0.6.0): contaminated zone - a bank of rolling gas that hugs the ground (GAS_TALL high, GAS_LAYERS * GAS_GAP
  *     tiles deep). 0.5.0 drew three flat sheets as tall as the field wall with a slow 2D pattern: on video (run 11-19
  *     Gas) it read as green paint on glass - no depth, sky high, nearly still, one flat colour. Now GAS_LAYERS shells
@@ -63,6 +64,15 @@ public final class BlueZoneWall {
     static final float GAS_TALL = 28f;       // cloud height above the ground (render units); the rolling top reaches 1.45x
     static final float GAS_BELOW = 25f;      // shells reach this far below the ground level (fills dips)
     static final float GAS_GROUND = 0f;      // ground in render y: the scene origin is the player's floor
+    // Near part of the gas = puffs (0.7.0). Run 11-19 long: seen from a tile or two away the shells turned back into
+    // vertical streaks up to the sky (7:37) and left clear slits at the horizon (6:52, 10:20). Billboards have no such
+    // direction: every puff is a round lump facing the camera. Shells stay as the far backdrop only (uCam.w).
+    static final float PUFF_RANGE = 130f;    // tiles around the camera that get puffs
+    static final float PUFF_CELL = 7f;       // one ground puff per cell of this size (world-anchored, so the gas rolls over the land as the circle shrinks)
+    static final float PUFF_DEPTH = 60f;     // tiles outside the circle that get puffs
+    static final float PUFF_ALPHA = 0.86f;   // one puff's peak opacity (overlap makes it solid), as in PongDu
+    static final float PUFF_INSIDE_THIN = 0.65f;   // camera in the gas: puffs keep 35% so the view is a haze (the Lua tint does the rest)
+    static final int MAX_PUFFS = 1400;
     // Distance fade, both styles (0.6.1). Viewpoint hazes far terrain and trees toward the sky colour, the wall was drawn
     // at full strength: on video (run 11-19 Gas, 9:46) far forest in front of the wall hid its foot and looked like sky,
     // so the wall seemed to float, and its far end was cut by a straight vertical edge (far plane 400 / ARC_HALF).
@@ -117,7 +127,7 @@ public final class BlueZoneWall {
             "uniform vec4 uNear;\n" +
             "uniform vec4 uPhi;\n" +
             "uniform float uR;\n" +
-            "uniform vec4 uCam;\n" + // camera, xy = world tiles relative to the scene origin, z = render height
+            "uniform vec4 uCam;\n" + // camera, xy = world tiles relative to the scene origin, z = render height, w = gas: shells only show beyond this range (puffs cover the near part)
             "uniform vec4 uOrg;\n" + // xy = scene origin mod 1024 (keeps the gas noise fixed in the world), zw = distance fade start / end
             "uniform vec4 uGas;\n" + // gas: x = shell spacing, y = slab thickness, z = cloud height, w = ground (render y)
             "out vec4 fragColor;\n" +
@@ -164,7 +174,8 @@ public final class BlueZoneWall {
             "        float a = (1.0 - exp(-uColor.a * dens * len)) * smoothstep(-0.3, 1.4, vW.z - ground);\n" + // absorption along the slice; fades at the ground so shells leave no lines on it
             "        float lit = clamp(0.15 + 0.85 * hgt / max(top, 0.01), 0.0, 1.0) * (0.35 + 0.65 * puff);\n" +
             "        vec3 c = mix(uColor.rgb * vec3(0.20, 0.30, 0.34), uColor.rgb * 1.10 + vec3(0.16, 0.13, 0.02), lit);\n" +
-            "        fragColor = vec4(c, clamp(a, 0.0, 0.92) * haze);\n" +
+            "        float farOnly = smoothstep(uCam.w * 0.60, uCam.w * 0.95, length(vW - uCam.xyz));\n" +
+            "        fragColor = vec4(c, clamp(a, 0.0, 0.92) * haze * farOnly);\n" +
             "        return;\n" +
             "    }\n" +
             "    float fade = smoothstep(0.0, 0.04, v) * (1.0 - smoothstep(0.80, 1.0, v));\n" +
@@ -181,11 +192,74 @@ public final class BlueZoneWall {
             "    fragColor = vec4(c, clamp(a, 0.0, 0.92) * haze);\n" +
             "}\n";
 
+    // Gas puffs (0.7.0): camera-facing billboards, the same technique as the PongDu reanimation gas (pongduvp.Fx3D, mode 2).
+    // uPos = centre (render space, relative to the scene origin) + size, uTint = colour + opacity,
+    // uMisc = seed, time, ground height (render y), light.
+    static final String PVS =
+            "#version 330 core\n" +
+            "uniform mat4 uView;\n" +
+            "uniform mat4 uProj;\n" +
+            "uniform vec4 uPos;\n" +
+            "uniform vec4 uRight;\n" +
+            "uniform vec4 uUp;\n" +
+            "uniform vec4 uEye;\n" +
+            "out vec2 uv;\n" +
+            "out float nearK;\n" +
+            "out float vY;\n" +
+            "const vec2 CORNER[6] = vec2[6](vec2(0.0, 0.0), vec2(1.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 0.0), vec2(1.0, 1.0), vec2(0.0, 1.0));\n" +
+            "void main() {\n" +
+            "    vec2 q = CORNER[gl_VertexID];\n" +
+            "    uv = q;\n" +
+            "    float size = uPos.w;\n" +
+            "    vec3 p = uPos.xyz + uRight.xyz * (q.x - 0.5) * size + uUp.xyz * (q.y - 0.5) * size;\n" +
+            "    float rad = size * 0.5;\n" +
+            "    nearK = smoothstep(rad * 0.8, rad * 3.0, length(uPos.xyz - uEye.xyz));\n" + // puffs around the camera fade out so the view does not go solid
+            "    vY = p.y;\n" +
+            "    gl_Position = uProj * uView * vec4(p, 1.0);\n" +
+            "}\n";
+    static final String PFS =
+            "#version 330 core\n" +
+            "uniform vec4 uTint;\n" +
+            "uniform vec4 uMisc;\n" +
+            "in vec2 uv;\n" +
+            "in float nearK;\n" +
+            "in float vY;\n" +
+            "out vec4 color;\n" +
+            "float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }\n" +
+            "float noise(vec2 p) {\n" +
+            "    vec2 i = floor(p), f = fract(p);\n" +
+            "    vec2 u = f * f * (3.0 - 2.0 * f);\n" +
+            "    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),\n" +
+            "               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);\n" +
+            "}\n" +
+            "float fbm(vec2 p) {\n" +
+            "    float v = 0.0, amp = 0.5;\n" +
+            "    for (int k = 0; k < 4; k++) { v += amp * noise(p); p = p * 2.03 + vec2(17.0, 9.0); amp *= 0.5; }\n" +
+            "    return v;\n" +
+            "}\n" +
+            "void main() {\n" +
+            "    float seed = uMisc.x; float time = uMisc.y; float floorY = uMisc.z;\n" +
+            "    vec2 c = uv * 2.0 - 1.0;\n" +
+            "    float ang = seed * 6.2831853;\n" +
+            "    vec2 rc = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * c;\n" +
+            "    float n = fbm(rc * 1.7 + vec2(seed * 13.0, seed * 7.0) + vec2(time * 0.05, -time * 0.035));\n" +
+            "    float shape = 1.0 - smoothstep(0.38, 1.0, length(c) + (n - 0.5) * 0.7);\n" +
+            "    float al = shape * uTint.a * nearK * smoothstep(floorY, floorY + 1.4, vY);\n" + // fades into the ground instead of a straight cut
+            "    if (al < 0.003) discard;\n" +
+            "    float lit = 0.50 + 0.62 * clamp(0.5 + c.y * 0.6 + (n - 0.5) * 0.7, 0.0, 1.0);\n" +
+            "    vec3 col = mix(uTint.rgb * vec3(0.55, 0.70, 0.75), uTint.rgb + vec3(0.10, 0.08, 0.0), clamp(lit - 0.45, 0.0, 1.0) * 1.5);\n" +
+            "    color = vec4(col * lit * uMisc.w * al, al);\n" +
+            "}\n";
+
     private static final BlueZoneWall INSTANCE = new BlueZoneWall();
 
     private int program, vao;
     private int uView, uProj, uNear, uPhi, uR, uDa, uQuads, uMap, uY, uU0, uOff, uColor, uTime, uStyle, uSeed, uCam, uOrg, uGas;
     private final int[] gasOrder = new int[GAS_LAYERS];
+    private int puffProgram, pView, pProj, pPos, pRight, pUp, pEye, pTint, pMisc;
+    private final float[] puffData = new float[MAX_PUFFS * 6];   // per puff: render x, y, z, size, opacity, seed
+    private final long[] puffKeys = new long[MAX_PUFFS];
+    private int lastPuffs;
     private int lastStyle = -1;
     private boolean broken;
     private int errors;
@@ -244,6 +318,8 @@ public final class BlueZoneWall {
 
     private void closeGl() {
         try { if (program != 0) glDeleteProgram(program); } catch (Throwable ignored) { }
+        try { if (puffProgram != 0) glDeleteProgram(puffProgram); } catch (Throwable ignored) { }
+        puffProgram = 0;
         program = 0;   // the vertex array is kept: it holds no data
     }
 
@@ -269,10 +345,8 @@ public final class BlueZoneWall {
         return s;
     }
 
-    /** compiles the program and makes the (empty) vertex array; throws when the shader does not build */
-    private void initGl() {
-        if (program != 0) return;
-        int vs = shader(GL_VERTEX_SHADER, VS), fs = shader(GL_FRAGMENT_SHADER, FS);
+    private static int link(String vsSrc, String fsSrc) {
+        int vs = shader(GL_VERTEX_SHADER, vsSrc), fs = shader(GL_FRAGMENT_SHADER, fsSrc);
         int p = glCreateProgram();
         glAttachShader(p, vs);
         glAttachShader(p, fs);
@@ -284,6 +358,25 @@ public final class BlueZoneWall {
             glDeleteProgram(p);
             throw new IllegalStateException("program link: " + info);
         }
+        return p;
+    }
+
+    /** compiles the programs and makes the (empty) vertex array; throws when a shader does not build */
+    private void initGl() {
+        if (program != 0) return;
+        int p = link(VS, FS);
+        int pp = link(PVS, PFS);
+        pView = glGetUniformLocation(pp, "uView");
+        pProj = glGetUniformLocation(pp, "uProj");
+        pPos = glGetUniformLocation(pp, "uPos");
+        pRight = glGetUniformLocation(pp, "uRight");
+        pUp = glGetUniformLocation(pp, "uUp");
+        pEye = glGetUniformLocation(pp, "uEye");
+        pTint = glGetUniformLocation(pp, "uTint");
+        pMisc = glGetUniformLocation(pp, "uMisc");
+        puffProgram = pp;
+        log("gl ready: puff program " + pp + " uniforms view=" + pView + " proj=" + pProj + " pos=" + pPos + " right=" + pRight + " up=" + pUp
+                + " eye=" + pEye + " tint=" + pTint + " misc=" + pMisc);
         uView = glGetUniformLocation(p, "uView");
         uProj = glGetUniformLocation(p, "uProj");
         uNear = glGetUniformLocation(p, "uNear");
@@ -462,6 +555,7 @@ public final class BlueZoneWall {
             try {
                 initGl();
                 mBind.invoke(null);
+                try { probe(frame, proj); } catch (Throwable t) { probeOff = true; log("probe off (wall still draws): " + t); }
                 glUseProgram(program);
                 glBindVertexArray(vao);
                 glEnable(GL_BLEND);
@@ -490,7 +584,7 @@ public final class BlueZoneWall {
                 // camera in world tiles relative to the scene origin (the axis mapping is its own inverse transposed)
                 float cwx = (float) (mm[0] * cam[0] + mm[2] * cam[2]), cwy = (float) (mm[1] * cam[0] + mm[3] * cam[2]);
                 Vec3 org = v.sceneOrigin();
-                glUniform4f(uCam, cwx, cwy, (float) cam[1], 0f);
+                glUniform4f(uCam, cwx, cwy, (float) cam[1], gas ? PUFF_RANGE : 0f);
                 glUniform4f(uOrg, (float) (org.x() % 1024.0), (float) (org.y() % 1024.0), FADE_NEAR, FADE_FAR);
                 if (gas) {
                     glUniform4f(uY, GAS_GROUND - GAS_BELOW, GAS_GROUND + GAS_TALL * 1.5f, 0f, 0f);
@@ -508,7 +602,7 @@ public final class BlueZoneWall {
                 if (style != lastStyle) {
                     lastStyle = style;
                     log("wall style " + style + (gas ? " (gas, " + GAS_LAYERS + " shells " + GAS_GAP + " tiles apart, cloud " + GAS_TALL + " high, camera "
-                            + f1(camS) + " tiles outside the edge)" : " (field)") + " fade " + FADE_NEAR + "-" + FADE_FAR + " tiles");
+                            + f1(camS) + " tiles outside the edge, puffs within " + PUFF_RANGE + " tiles)" : " (field)") + " fade " + FADE_NEAR + "-" + FADE_FAR + " tiles");
                 }
 
                 boolean counting = beginSamples();
@@ -527,7 +621,9 @@ public final class BlueZoneWall {
                         glUniform1f(uSeed, gasOrder[i]);
                         glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
                     }
+                    lastPuffs = drawPuffs(view, proj, colMajor, cam, mm, org, blue, cwx, cwy, camS, (float) (v.seconds() % 1000.0));
                 } else {
+                    lastPuffs = 0;
                     glUniform1f(uOff, 0f);
                     glUniform1f(uSeed, 0f);
                     glDrawArrays(GL_TRIANGLES, 0, quads * VERTS_PER_QUAD);
@@ -557,6 +653,158 @@ public final class BlueZoneWall {
             }
         } catch (Throwable t) {
             fail("draw", t);
+        }
+    }
+
+    // ── gas puffs ──────────────────────────────────────────────
+
+    /** 0..1 from three ints, the same on every client (puff layout must not depend on the machine) */
+    static float ih(int a, int b, int k) {
+        int x = a * 73856093 ^ b * 19349663 ^ k * 83492791;
+        x = (x ^ (x >>> 15)) * 0x2c1b3c6d;
+        x = (x ^ (x >>> 12)) * 0x297a2d39;
+        x ^= x >>> 15;
+        return (x >>> 8) / 16777216f;
+    }
+
+    private static float clamp01(double v) { return v < 0 ? 0f : v > 1 ? 1f : (float) v; }
+
+    /**
+     * Draws the near gas as billboards: one ground puff per world cell in the band outside the circle, plus a second
+     * and a third layer on some cells so the bank has a lumpy top. Sorted far to near, premultiplied alpha, depth
+     * tested, no depth writes. Returns how many were drawn. Called with the wall program's GL state already set.
+     */
+    private int drawPuffs(float[] view, float[] proj, boolean colMajor, double[] cam, float[] mm, Vec3 org, double[] blue,
+                          float cwx, float cwy, float camS, float time) {
+        double camWX = org.x() + cwx, camWY = org.y() + cwy;
+        int c0x = (int) Math.floor((camWX - PUFF_RANGE) / PUFF_CELL), c1x = (int) Math.floor((camWX + PUFF_RANGE) / PUFF_CELL);
+        int c0y = (int) Math.floor((camWY - PUFF_RANGE) / PUFF_CELL), c1y = (int) Math.floor((camWY + PUFF_RANGE) / PUFF_CELL);
+        float thin = 1f - PUFF_INSIDE_THIN * clamp01(camS / 8.0);
+        int n = 0;
+        for (int gx = c0x; gx <= c1x && n < MAX_PUFFS - 3; gx++) {
+            for (int gy = c0y; gy <= c1y && n < MAX_PUFFS - 3; gy++) {
+                double wx = (gx + 0.15 + 0.7 * ih(gx, gy, 1)) * PUFF_CELL, wy = (gy + 0.15 + 0.7 * ih(gx, gy, 2)) * PUFF_CELL;
+                double s = Math.hypot(wx - blue[0], wy - blue[1]) - blue[2];
+                if (s < -3 || s > PUFF_DEPTH) continue;
+                double d = Math.hypot(wx - camWX, wy - camWY);
+                if (d > PUFF_RANGE) continue;
+                float band = clamp01((s + 3) / 8.0) * (1f - clamp01((s - PUFF_DEPTH * 0.75) / (PUFF_DEPTH * 0.25)));
+                float edge = 1f - clamp01((d - PUFF_RANGE * 0.7) / (PUFF_RANGE * 0.3));
+                float a0 = PUFF_ALPHA * band * edge * thin;
+                if (a0 < 0.01f) continue;
+                double dx = wx - org.x(), dy = wy - org.y();
+                float rx = (float) (mm[0] * dx + mm[1] * dy), rz = (float) (mm[2] * dx + mm[3] * dy);
+                for (int layer = 0; layer < 3; layer++) {
+                    float chance = layer == 0 ? 1f : layer == 1 ? 0.55f : 0.22f;
+                    if (ih(gx, gy, 20 + layer) > chance) continue;
+                    float size, cy;
+                    if (layer == 0) { size = 10f + 3.5f * ih(gx, gy, 4); cy = size * (0.32f + 0.06f * ih(gx, gy, 3)); }   // lower edge reaches the ground
+                    else if (layer == 1) { size = 8.5f + 3f * ih(gx, gy, 6); cy = 8f + 3f * ih(gx, gy, 7); }
+                    else { size = 9f + 4f * ih(gx, gy, 9); cy = 15f + 5f * ih(gx, gy, 10); }
+                    float ry = GAS_GROUND + cy + 0.5f * (float) Math.sin(time * 0.25 + ih(gx, gy, 30 + layer) * 6.2831853);
+                    double ex = rx - cam[0], ey = ry - cam[1], ez = rz - cam[2];
+                    float dist = (float) Math.sqrt(ex * ex + ey * ey + ez * ez);
+                    int o = n * 6;
+                    puffData[o] = rx; puffData[o + 1] = ry; puffData[o + 2] = rz; puffData[o + 3] = size;
+                    puffData[o + 4] = a0 * (layer == 0 ? 1f : 0.9f); puffData[o + 5] = ih(gx, gy, 40 + layer);
+                    puffKeys[n] = ((long) Float.floatToIntBits(dist) << 32) | n;      // positive floats sort like their bits
+                    n++;
+                }
+            }
+        }
+        if (n == 0) return 0;
+        java.util.Arrays.sort(puffKeys, 0, n);
+        glUseProgram(puffProgram);
+        glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);           // premultiplied; the target's alpha is left alone
+        glUniformMatrix4fv(pView, !colMajor, view);
+        glUniformMatrix4fv(pProj, !colMajor, proj);
+        if (colMajor) { glUniform4f(pRight, view[0], view[4], view[8], 0f); glUniform4f(pUp, view[1], view[5], view[9], 0f); }
+        else          { glUniform4f(pRight, view[0], view[1], view[2], 0f); glUniform4f(pUp, view[4], view[5], view[6], 0f); }
+        glUniform4f(pEye, (float) cam[0], (float) cam[1], (float) cam[2], 0f);
+        for (int i = n - 1; i >= 0; i--) {                                              // far to near
+            int o = (int) (puffKeys[i] & 0xffffffffL) * 6;
+            glUniform4f(pPos, puffData[o], puffData[o + 1], puffData[o + 2], puffData[o + 3]);
+            glUniform4f(pTint, GAS_COLOR[0], GAS_COLOR[1], GAS_COLOR[2], puffData[o + 4]);
+            glUniform4f(pMisc, puffData[o + 5], time, GAS_GROUND, 1f);
+            glDrawArrays(GL_TRIANGLES, 0, 6);
+        }
+        return n;
+    }
+
+    // ── scene probe (0.6.2, diagnostics only: nothing here changes what is drawn) ──
+    // Question for the next gas version: can the wall read Viewpoint's scene depth and fog, so gas can be a real
+    // distance fog over the whole outside instead of shells? Names are from javap of Viewpoint 0.1.7 (no decompiling):
+    //   viewpoint.render.WorldRenderer.targets (static) -> Targets.depth / farDepth / albedo (GL texture names),
+    //   FrameContext.scene -> SceneData.fogR/G/B, fogStart, fogEnd; FrameContext.farNear / farFar; WorldRenderer.NEAR / FAR.
+    // Logged once per PROBE_EVERY_MS while the wall draws. Any failure is logged once and the probe stops; the wall goes on.
+    static final long PROBE_EVERY_MS = 60000L;
+    private long nextProbe;
+    private boolean probeOff;
+
+    private static Object field(Object o, Class<?> c, String name) throws Exception {
+        java.lang.reflect.Field f = c.getDeclaredField(name);
+        f.setAccessible(true);
+        return f.get(o);
+    }
+
+    private static String texInfo(int tex) {
+        if (tex <= 0) return "none";
+        while (glGetError() != GL_NO_ERROR) { }
+        glBindTexture(GL_TEXTURE_2D, tex);
+        int err = glGetError();
+        if (err != GL_NO_ERROR) return "id " + tex + " not a 2D texture (bind error 0x" + Integer.toHexString(err) + ", multisample?)";
+        return "id " + tex + " " + glGetTexLevelParameteri(GL_TEXTURE_2D, 0, GL_TEXTURE_WIDTH) + "x" + glGetTexLevelParameteri(GL_TEXTURE_2D, 0, GL_TEXTURE_HEIGHT)
+                + " format 0x" + Integer.toHexString(glGetTexLevelParameteri(GL_TEXTURE_2D, 0, GL_TEXTURE_INTERNAL_FORMAT))
+                + " compare 0x" + Integer.toHexString(glGetTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE));
+    }
+
+    /** called with Viewpoint's target bound (after WorldRenderer.bindTarget) */
+    private void probe(Object frame, float[] proj) {
+        if (probeOff) return;
+        long now = System.currentTimeMillis();
+        if (now < nextProbe) return;
+        nextProbe = now + PROBE_EVERY_MS;
+        int oldTex = glGetInteger(GL_TEXTURE_BINDING_2D);
+        try {
+            ClassLoader cl = frame.getClass().getClassLoader();
+            Class<?> wr = Class.forName("viewpoint.render.WorldRenderer", false, cl);
+            Object targets = field(null, wr, "targets");
+            String tex = "targets=null";
+            if (targets != null) {
+                Class<?> tc = targets.getClass();
+                int depth = (Integer) field(targets, tc, "depth"), farDepth = (Integer) field(targets, tc, "farDepth"), albedo = (Integer) field(targets, tc, "albedo");
+                int fbo = glGetInteger(GL_DRAW_FRAMEBUFFER_BINDING);
+                int attDepth = glGetFramebufferAttachmentParameteri(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+                int attType = glGetFramebufferAttachmentParameteri(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE);
+                int attColor = glGetFramebufferAttachmentParameteri(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME);
+                tex = "size=" + field(targets, tc, "width") + "x" + field(targets, tc, "height")
+                        + " depth[" + texInfo(depth) + "] farDepth[" + texInfo(farDepth) + "] albedo id " + albedo
+                        + " | bound fbo " + fbo + " depthAttachment=" + attDepth + " (type 0x" + Integer.toHexString(attType) + (attDepth == depth ? ", = Targets.depth" : attDepth == farDepth ? ", = Targets.farDepth" : ", other")
+                        + ") color0=" + attColor;
+            }
+            while (glGetError() != GL_NO_ERROR) { }
+            int clip = glGetInteger(0x935D);                       // GL_CLIP_DEPTH_MODE (GL 4.5): 0x935E = -1..1, 0x935F = 0..1
+            String clipMode = glGetError() != GL_NO_ERROR ? "n/a" : "0x" + Integer.toHexString(clip);
+            Class<?> fc = frame.getClass();
+            Object scene = field(frame, fc, "scene");
+            String fog = "scene=null";
+            if (scene != null) {
+                Class<?> sc = scene.getClass();
+                fog = "fog rgb=(" + f2((Float) field(scene, sc, "fogR")) + "," + f2((Float) field(scene, sc, "fogG")) + "," + f2((Float) field(scene, sc, "fogB"))
+                        + ") start=" + f1((Float) field(scene, sc, "fogStart")) + " end=" + f1((Float) field(scene, sc, "fogEnd"))
+                        + " sky rgb=(" + f2((Float) field(scene, sc, "skyR")) + "," + f2((Float) field(scene, sc, "skyG")) + "," + f2((Float) field(scene, sc, "skyB")) + ")";
+            }
+            log("probe: " + tex + " | clipDepth=" + clipMode + " depthFunc=0x" + Integer.toHexString(glGetInteger(GL_DEPTH_FUNC))
+                    + " near=" + field(null, wr, "NEAR") + " far=" + field(null, wr, "FAR")
+                    + " farNear=" + field(frame, fc, "farNear") + " farFar=" + field(frame, fc, "farFar")
+                    + " frame=" + field(frame, fc, "width") + "x" + field(frame, fc, "height") + " out=" + field(frame, fc, "outputWidth") + "x" + field(frame, fc, "outputHeight")
+                    + " proj[10]=" + proj[10] + " proj[14]=" + proj[14] + " | " + fog);
+        } catch (Throwable t) {
+            probeOff = true;
+            log("probe off (wall still draws): " + t);
+        } finally {
+            glBindTexture(GL_TEXTURE_2D, oldTex);
+            while (glGetError() != GL_NO_ERROR) { }
         }
     }
 
@@ -656,7 +904,7 @@ public final class BlueZoneWall {
         if (nextStat != 0) {
             double edge = Math.hypot(ZoneState.px - blue[0], ZoneState.py - blue[1]) - blue[2];
             log("wall frames drawn=" + drawnFrames + " skipped(far from edge)=" + skippedFar + " last quads=" + quads + " (last 10s)"
-                    + " edgeDist=" + f1(edge) + " pixels=" + lastSamples + " axes=" + mapName(mapping) + (calibrated ? "(calibrated)" : "(default)")
+                    + " edgeDist=" + f1(edge) + " puffs=" + lastPuffs + " pixels=" + lastSamples + " axes=" + mapName(mapping) + (calibrated ? "(calibrated)" : "(default)")
                     + " headingDot=" + f2(lastFwdDot) + " nearestWallNdc=" + lastNdc
                     + " cam=(" + f1(cam[0]) + "," + f1(cam[1]) + "," + f1(cam[2]) + ")");
         }

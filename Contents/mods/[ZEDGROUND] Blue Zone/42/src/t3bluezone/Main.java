@@ -6,7 +6,7 @@ package t3bluezone;
  * The wall only draws when Viewpoint is installed; without it the patched class never loads and nothing happens.
  */
 public class Main {
-    public static final String VERSION = "0.6.1";
+    public static final String VERSION = "0.7.0";
 
     public static void main(String[] args) {
         BlueZoneWall.log("loaded v" + VERSION + " (ZombieBuddy, draws after Viewpoint's translucent pass)");
