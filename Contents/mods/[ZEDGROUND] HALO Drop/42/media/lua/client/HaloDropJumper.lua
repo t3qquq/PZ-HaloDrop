@@ -696,12 +696,53 @@ function HaloDropJumper.isAreaReady()
     return J.jump.areaReady == true
 end
 
+-- 강하 중 자세를 건드리는 바닐라 입력 잠금 (11-19 Gas 런 1차 강하: 탑승 때부터 PlayerAimState 였고, 조준 상태라
+-- IsoPlayer.allowsTwist 가 true 가 돼 상체 비틀기(어깨 최대 15도)와 조준 회전 클립(Bob_IdleAim1Hand_Turn180L)이
+-- 강하 자세 위에 얹혔다. 조준이 꺼져 있던 2차 강하는 같은 장비·같은 조작에서 깨끗했다).
+--   조준: setIgnoreAimingInput(true) -> IsoGameCharacter.isAiming() 이 false (공격 애니메이션 중만 예외)
+--   공격·밀치기·잡기: setAuthorizedHandToHandAction / setAuthorizedHandToHand(false) -> IsoPlayer.DoAttack 이 바로 false.
+--     공격 애니메이션이 돌면 isPerformingHostileAnimation 으로 isAiming 이 다시 true 가 되므로 같이 막는다
+--   웅크리기: 토글 키라 누를 때마다 다시 켜진다 -> 매 틱 setSneaking(false)
+-- 탑승(ABOARD)부터 착지(finish)까지 건다. 값은 저장되지 않는 런타임 값이라 강하 중 접속이 끊겨도 남지 않는다.
+local _poseLock = false
+local function poseLock(p, on)
+    if on then
+        if not _poseLock then
+            _poseLock = true
+            local wasAim, wasSneak = false, false
+            pcall(function() wasAim = p:isAiming() end)
+            pcall(function() wasSneak = p:isSneaking() end)
+            local okAim, errAim = pcall(function() p:setIgnoreAimingInput(true) end)
+            local okAtk, errAtk = pcall(function()
+                p:setAuthorizedHandToHandAction(false)
+                p:setAuthorizedHandToHand(false)
+            end)
+            log(string.format("pose lock ON: aim ignored ok=%s attack blocked ok=%s (was aiming=%s sneaking=%s)%s%s",
+                tostring(okAim), tostring(okAtk), tostring(wasAim), tostring(wasSneak),
+                okAim and "" or (" aimErr=" .. tostring(errAim)), okAtk and "" or (" atkErr=" .. tostring(errAtk))))
+        end
+        if p:isSneaking() then
+            p:setSneaking(false)
+            log("pose lock: sneak turned off")
+        end
+    elseif _poseLock then
+        _poseLock = false
+        local okAim = pcall(function() p:setIgnoreAimingInput(false) end)
+        local okAtk = pcall(function()
+            p:setAuthorizedHandToHandAction(true)
+            p:setAuthorizedHandToHand(true)
+        end)
+        log(string.format("pose lock OFF: aim input ok=%s attack ok=%s", tostring(okAim), tostring(okAtk)))
+    end
+end
+
 -- ── 상태 전이 ─────────────────────────────────────────────────────────────────
 local function finish(p)
     J.state = nil
     HaloDropPose.set(p, nil)
     planeSoundStop(p)
     p:setBlockMovement(false)
+    poseLock(p, false)
     HaloDropSky.close("finish")
     descentZoomStop("finish")
 end
@@ -841,6 +882,7 @@ local function onPlayerUpdate(p)
     if dt < 0 then dt = 0 elseif dt > 0.25 then dt = 0.25 end
     J.lastTs = now
     p:setBlockMovement(true)
+    poseLock(p, true)
     local carry = carryZ()
 
     -- 1초 주기 상태 로그 (실시간 검증용)
