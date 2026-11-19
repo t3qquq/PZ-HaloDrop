@@ -1,6 +1,6 @@
 {
-  "IGUI_ZedHUD_ZoneWait": "Phase %1 · Zone shrinks in %2",
-  "IGUI_ZedHUD_ZoneShrink": "Phase %1 · Zone shrinking %2",
-  "IGUI_ZedHUD_ZoneDone": "Final zone",
+  "IGUI_ZedHUD_ZoneWait": "Phase %1 · Containment zone shrinks in %2",
+  "IGUI_ZedHUD_ZoneShrink": "Phase %1 · Containment zone shrinking %2",
+  "IGUI_ZedHUD_ZoneDone": "Final containment phase",
   "IGUI_ZedHUD_ZonePaused": "(paused)"
 }

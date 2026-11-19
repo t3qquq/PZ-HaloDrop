@@ -1,8 +1,8 @@
 {
-  "ContextMenu_BlueZone": "Blue Zone",
-  "ContextMenu_BlueZone_Start": "Start blue zone",
+  "ContextMenu_BlueZone": "Containment zone",
+  "ContextMenu_BlueZone_Start": "Start containment",
   "ContextMenu_BlueZone_Pause": "Pause",
   "ContextMenu_BlueZone_Resume": "Resume",
   "ContextMenu_BlueZone_NextPhase": "Next step (wait: start shrinking now, shrink: finish now)",
-  "ContextMenu_BlueZone_Stop": "Stop blue zone"
+  "ContextMenu_BlueZone_Stop": "Stop containment"
 }

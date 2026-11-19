@@ -1,6 +1,6 @@
 {
-  "IGUI_ZedHUD_ZoneWait": "%1단계 · 자기장 축소까지 %2",
-  "IGUI_ZedHUD_ZoneShrink": "%1단계 · 자기장 축소 중 %2",
-  "IGUI_ZedHUD_ZoneDone": "자기장 최종 단계",
+  "IGUI_ZedHUD_ZoneWait": "%1차 봉쇄 구역 축소까지 %2",
+  "IGUI_ZedHUD_ZoneShrink": "%1차 봉쇄 구역 축소 중 %2",
+  "IGUI_ZedHUD_ZoneDone": "봉쇄 구역 최종 축소 완료",
   "IGUI_ZedHUD_ZonePaused": "(일시정지)"
 }
