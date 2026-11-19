@@ -63,6 +63,11 @@ public final class BlueZoneWall {
     static final float GAS_TALL = 28f;       // cloud height above the ground (render units); the rolling top reaches 1.45x
     static final float GAS_BELOW = 25f;      // shells reach this far below the ground level (fills dips)
     static final float GAS_GROUND = 0f;      // ground in render y: the scene origin is the player's floor
+    // Distance fade, both styles (0.6.1). Viewpoint hazes far terrain and trees toward the sky colour, the wall was drawn
+    // at full strength: on video (run 11-19 Gas, 9:46) far forest in front of the wall hid its foot and looked like sky,
+    // so the wall seemed to float, and its far end was cut by a straight vertical edge (far plane 400 / ARC_HALF).
+    static final float FADE_NEAR = 170f;     // tiles from the camera where the wall starts to fade
+    static final float FADE_FAR = 330f;      // gone from here on (before the far plane and the end of the arc)
 
     static final int VERTS_PER_QUAD = 6;
 
@@ -112,8 +117,8 @@ public final class BlueZoneWall {
             "uniform vec4 uNear;\n" +
             "uniform vec4 uPhi;\n" +
             "uniform float uR;\n" +
-            "uniform vec4 uCam;\n" + // gas: camera, xy = world tiles relative to the scene origin, z = render height
-            "uniform vec4 uOrg;\n" + // gas: scene origin mod 1024 (keeps the noise fixed in the world)
+            "uniform vec4 uCam;\n" + // camera, xy = world tiles relative to the scene origin, z = render height
+            "uniform vec4 uOrg;\n" + // xy = scene origin mod 1024 (keeps the gas noise fixed in the world), zw = distance fade start / end
             "uniform vec4 uGas;\n" + // gas: x = shell spacing, y = slab thickness, z = cloud height, w = ground (render y)
             "out vec4 fragColor;\n" +
             "float hash(float n) { return fract(sin(n) * 43758.5453); }\n" +
@@ -130,6 +135,8 @@ public final class BlueZoneWall {
             "}\n" +
             "void main() {\n" +
             "    float u = vUV.x; float v = vUV.y;\n" +
+            "    float haze = 1.0 - smoothstep(uOrg.z, uOrg.w, length(vW - uCam.xyz));\n" + // distance fade (both styles), see FADE_NEAR
+            "    if (haze <= 0.0) discard;\n" +
             "    if (uStyle > 1.5) {\n" +
             "        float gap = uGas.x; float thick = uGas.y; float tall = uGas.z; float ground = uGas.w;\n" +
             "        vec3 d = normalize(vW - uCam.xyz);\n" + // view ray through this shell point
@@ -157,11 +164,11 @@ public final class BlueZoneWall {
             "        float a = (1.0 - exp(-uColor.a * dens * len)) * smoothstep(-0.3, 1.4, vW.z - ground);\n" + // absorption along the slice; fades at the ground so shells leave no lines on it
             "        float lit = clamp(0.15 + 0.85 * hgt / max(top, 0.01), 0.0, 1.0) * (0.35 + 0.65 * puff);\n" +
             "        vec3 c = mix(uColor.rgb * vec3(0.20, 0.30, 0.34), uColor.rgb * 1.10 + vec3(0.16, 0.13, 0.02), lit);\n" +
-            "        fragColor = vec4(c, clamp(a, 0.0, 0.92));\n" +
+            "        fragColor = vec4(c, clamp(a, 0.0, 0.92) * haze);\n" +
             "        return;\n" +
             "    }\n" +
             "    float fade = smoothstep(0.0, 0.04, v) * (1.0 - smoothstep(0.80, 1.0, v));\n" +
-            "    float haze = noise(vec2(u * 0.12, v * 5.0 - uTime * 0.5)) * 0.6\n" +
+            "    float shim = noise(vec2(u * 0.12, v * 5.0 - uTime * 0.5)) * 0.6\n" +
             "               + noise(vec2(u * 0.45, v * 18.0 - uTime * 1.4)) * 0.4;\n" +
             "    float col = floor(u * 0.5);\n" +
             "    float wob = noise(vec2(col * 3.7, v * 26.0 + uTime * 9.0)) - 0.5;\n" +
@@ -169,9 +176,9 @@ public final class BlueZoneWall {
             "    float lit = step(0.80, hash(col * 1.37 + floor(uTime * 7.0) * 11.0));\n" +
             "    float len = step(hash(col * 2.11 + floor(uTime * 7.0) * 5.0) * 0.7, v);\n" +
             "    float bolt = smoothstep(0.07, 0.0, abs(x - 0.5)) * lit * len;\n" +
-            "    vec3 c = uColor.rgb * (0.55 + 0.9 * haze) + vec3(0.75, 0.92, 1.0) * bolt * 1.6;\n" +
-            "    float a = (uColor.a + 0.30 * haze + 0.55 * bolt) * fade;\n" +
-            "    fragColor = vec4(c, clamp(a, 0.0, 0.92));\n" +
+            "    vec3 c = uColor.rgb * (0.55 + 0.9 * shim) + vec3(0.75, 0.92, 1.0) * bolt * 1.6;\n" +
+            "    float a = (uColor.a + 0.30 * shim + 0.55 * bolt) * fade;\n" +
+            "    fragColor = vec4(c, clamp(a, 0.0, 0.92) * haze);\n" +
             "}\n";
 
     private static final BlueZoneWall INSTANCE = new BlueZoneWall();
@@ -480,13 +487,13 @@ public final class BlueZoneWall {
                 int style = ZoneState.style;
                 boolean gas = style == 2;
                 float camS = 0f;
+                // camera in world tiles relative to the scene origin (the axis mapping is its own inverse transposed)
+                float cwx = (float) (mm[0] * cam[0] + mm[2] * cam[2]), cwy = (float) (mm[1] * cam[0] + mm[3] * cam[2]);
+                Vec3 org = v.sceneOrigin();
+                glUniform4f(uCam, cwx, cwy, (float) cam[1], 0f);
+                glUniform4f(uOrg, (float) (org.x() % 1024.0), (float) (org.y() % 1024.0), FADE_NEAR, FADE_FAR);
                 if (gas) {
-                    // camera in world tiles relative to the scene origin (the axis mapping is its own inverse transposed)
-                    float cwx = (float) (mm[0] * cam[0] + mm[2] * cam[2]), cwy = (float) (mm[1] * cam[0] + mm[3] * cam[2]);
-                    Vec3 org = v.sceneOrigin();
                     glUniform4f(uY, GAS_GROUND - GAS_BELOW, GAS_GROUND + GAS_TALL * 1.5f, 0f, 0f);
-                    glUniform4f(uCam, cwx, cwy, (float) cam[1], 0f);
-                    glUniform4f(uOrg, (float) (org.x() % 1024.0), (float) (org.y() % 1024.0), 0f, 0f);
                     glUniform4f(uGas, GAS_GAP, GAS_GAP * GAS_LAYERS, GAS_TALL, GAS_GROUND);
                     // tiles the camera is outside the circle (same formula as the shader)
                     double qx = cwx - arcNear[0], qy = cwy - arcNear[1], rr = arcPhi[0] * qx + arcPhi[1] * qy, q2 = qx * qx + qy * qy;
@@ -501,7 +508,7 @@ public final class BlueZoneWall {
                 if (style != lastStyle) {
                     lastStyle = style;
                     log("wall style " + style + (gas ? " (gas, " + GAS_LAYERS + " shells " + GAS_GAP + " tiles apart, cloud " + GAS_TALL + " high, camera "
-                            + f1(camS) + " tiles outside the edge)" : " (field)"));
+                            + f1(camS) + " tiles outside the edge)" : " (field)") + " fade " + FADE_NEAR + "-" + FADE_FAR + " tiles");
                 }
 
                 boolean counting = beginSamples();
