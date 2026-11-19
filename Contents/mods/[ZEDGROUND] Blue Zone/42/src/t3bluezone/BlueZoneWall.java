@@ -31,6 +31,7 @@ import static org.lwjgl.opengl.GL33.*;
  * 32-bit floats stay exact for circles thousands of tiles wide.
  * Look: sandbox BlueZone.Style (read by ZoneState, the server's value reaches every client).
  *   1 field (0.2.0): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
+ *   2 gas (0.7.3): neon mint dropped from the palette (3 colours).
  *   2 gas (0.7.2): bright artificial green that drifts through GAS_PALETTE (same clock and order as Lua
  *     BlueZone.gasColor, so the wall, the screen tint and the map fill change together). Run 11-19 green gas: the dark
  *     olive gas read as murky and close to the foliage.
@@ -70,8 +71,7 @@ public final class BlueZoneWall {
     static final float[][] GAS_PALETTE = {
             { 0.62f, 1.00f, 0.05f },   // acid
             { 0.40f, 1.00f, 0.16f },   // lime
-            { 0.22f, 1.00f, 0.38f },   // radioactive
-            { 0.10f, 1.00f, 0.55f },   // neon mint
+            { 0.22f, 1.00f, 0.38f },   // radioactive (0.7.3: neon mint removed - read as cold gas, not poison)
     };
     static final long GAS_CYCLE_MS = 24000L;
     private final float[] gasNow = new float[3];
