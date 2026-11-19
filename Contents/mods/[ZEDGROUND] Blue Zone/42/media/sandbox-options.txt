@@ -25,6 +25,11 @@ option BlueZone.FirstRadius = {
     page = BlueZone, translation = BlueZone_FirstRadius,
 }
 
+option BlueZone.AvoidEmptyNW = {
+    type = boolean, default = true,
+    page = BlueZone, translation = BlueZone_AvoidEmptyNW,
+}
+
 option BlueZone.AreaX1 = {
     type = integer, min = 0, max = 100000, default = 1500,
     page = BlueZone, translation = BlueZone_AreaX1,

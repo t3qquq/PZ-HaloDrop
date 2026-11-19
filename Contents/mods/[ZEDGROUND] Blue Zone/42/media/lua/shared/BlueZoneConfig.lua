@@ -115,6 +115,31 @@ function BlueZone.isOutside(x, y, cx, cy, r)
     return dx * dx + dy * dy > r * r
 end
 
+-- 바닐라 B42 지도의 빈 북서쪽 (샌드박스 AvoidEmptyNW). HALO Drop 의 같은 이름 옵션과 같은 영역 (HaloDropServer.lua inEmptyNW).
+-- 셀 = 256칸. x < 45 이고 y < 18 인 직사각형 + x 45~58 에서 (45,3)-(58,0) 선 위쪽 삼각형 (t3 지도 캡처 11-08)
+local CELL = 256
+function BlueZone.inEmptyNW(x, y)
+    local cx, cy = x / CELL, y / CELL
+    if cx < 45 and cy < 18 then return true end
+    if cx >= 45 and cx <= 58 and cy < 3 - 3 * (cx - 45) / 13 then return true end
+    return false
+end
+
+-- 원 안에서 빈 북서쪽이 차지하는 비율(0~1). 원을 감싸는 9x9 격자 중 원 안에 든 점으로 센다
+function BlueZone.emptyFraction(cx, cy, r)
+    local n, hit = 0, 0
+    for i = -4, 4 do
+        for j = -4, 4 do
+            local dx, dy = i / 4 * r, j / 4 * r
+            if dx * dx + dy * dy <= r * r then
+                n = n + 1
+                if BlueZone.inEmptyNW(cx + dx, cy + dy) then hit = hit + 1 end
+            end
+        end
+    end
+    return n > 0 and hit / n or 0
+end
+
 -- 면제 구역(대기실 오일리그). X2 > X1 이고 Y2 > Y1 일 때만 적용
 function BlueZone.inExempt(x, y)
     local x1, y1 = BlueZone.opt("ExemptX1"), BlueZone.opt("ExemptY1")

@@ -67,6 +67,33 @@ local function clamp(v, lo, hi)
     return v
 end
 
+-- 빈 북서쪽 피하기 (샌드박스 AvoidEmptyNW). 흰 원(다음 안전 구역)이 바닐라 지도의 빈 땅에 잡히지 않게 다시 뽑는다.
+-- 기준: 원 중심이 빈 지역 밖이고, 원 넓이의 EMPTY_MAX 미만이 빈 지역. PICK_TRIES 번 다 걸리면 빈 비율이 가장 낮은 후보를 쓴다.
+local EMPTY_MAX, PICK_TRIES = 0.5, 40
+
+local function emptyBad(c)
+    return B.inEmptyNW(c.x, c.y) or B.emptyFraction(c.x, c.y, c.r) >= EMPTY_MAX
+end
+
+-- gen() 이 돌려주는 후보 원 중 빈 지역을 피한 것. what = 로그용 이름
+local function pickAvoiding(what, gen)
+    local c = gen()
+    if not B.opt("AvoidEmptyNW") or not emptyBad(c) then return c end
+    local best, bestFrac = c, B.emptyFraction(c.x, c.y, c.r)
+    for i = 2, PICK_TRIES do
+        c = gen()
+        if not emptyBad(c) then
+            log(string.format("%s: avoided empty north-west after %d tries -> (%.0f,%.0f r%.0f)", what, i, c.x, c.y, c.r))
+            return c
+        end
+        local f = B.emptyFraction(c.x, c.y, c.r)
+        if f < bestFrac then best, bestFrac = c, f end
+    end
+    log(string.format("%s: WARNING every try hit the empty north-west, using the least empty (%.0f,%.0f r%.0f, %.0f%% empty)",
+        what, best.x, best.y, best.r, bestFrac * 100))
+    return best
+end
+
 -- 페이즈 1 흰 원: 영역 안에 통째로 들어가는 원. hintX/hintY 가 있으면 그 점에 가장 가까운 자리, 없으면 무작위
 local function pickFirst(hintX, hintY)
     local x1, y1, x2, y2 = area()
@@ -79,9 +106,15 @@ local function pickFirst(hintX, hintY)
     if hintX and hintY then
         local cx, cy = clamp(hintX, x1 + r, x2 - r), clamp(hintY, y1 + r, y2 - r)
         log(string.format("first circle from center hint (%.0f,%.0f) -> (%.0f,%.0f)", hintX, hintY, cx, cy))
-        return { x = cx, y = cy, r = r }
+        local c = { x = cx, y = cy, r = r }
+        if B.opt("AvoidEmptyNW") and emptyBad(c) then
+            log(string.format("first circle from hint is %.0f%% empty north-west (hint kept)", B.emptyFraction(cx, cy, r) * 100))
+        end
+        return c
     end
-    return { x = ZombRandFloat(x1 + r, x2 - r), y = ZombRandFloat(y1 + r, y2 - r), r = r }
+    return pickAvoiding("first circle", function()
+        return { x = ZombRandFloat(x1 + r, x2 - r), y = ZombRandFloat(y1 + r, y2 - r), r = r }
+    end)
 end
 
 -- 시작 파란 원: 페이즈 1 흰 원과 같은 중심, 영역 네 모서리 중 가장 먼 곳까지 닿는 반지름 (영역 전체를 덮는다)
@@ -92,13 +125,15 @@ local function initialBlue(first)
     return { x = first.x, y = first.y, r = math.sqrt(dx * dx + dy * dy) }
 end
 
--- 다음 흰 원: 이전 흰 원 안에 통째로 들어가는 무작위 원 (원판 위 균일 분포)
+-- 다음 흰 원: 이전 흰 원 안에 통째로 들어가는 무작위 원 (원판 위 균일 분포). 빈 북서쪽은 pickAvoiding 으로 피한다
 local function pickNext(prev, ratio)
     local r = prev.r * ratio
     local maxOff = prev.r - r
-    local ang = ZombRandFloat(0, 2 * math.pi)
-    local d = maxOff * math.sqrt(ZombRandFloat(0, 1))
-    return { x = prev.x + math.cos(ang) * d, y = prev.y + math.sin(ang) * d, r = r }
+    return pickAvoiding("next circle", function()
+        local ang = ZombRandFloat(0, 2 * math.pi)
+        local d = maxOff * math.sqrt(ZombRandFloat(0, 1))
+        return { x = prev.x + math.cos(ang) * d, y = prev.y + math.sin(ang) * d, r = r }
+    end)
 end
 
 -- ── 상태 ─────────────────────────────────────────────────
@@ -179,8 +214,8 @@ local function startRound(by, hintX, hintY)
         nextDamage = now + DAMAGE_INTERVAL_MS, nextSync = now + SYNC_INTERVAL_MS, hurt = {}, lastPos = {} }
     setSeg(now, "wait", B.PHASES[1].wait)
     local x1, y1, x2, y2 = area()
-    log(string.format("round %d started by %s: area=(%d,%d)-(%d,%d) waitScale=%.2f shrinkScale=%.2f damageScale=%.2f first=(%.0f,%.0f r%.0f) start blue r%.0f",
-        S.id, tostring(by), x1, y1, x2, y2, B.opt("WaitScale"), B.opt("ShrinkScale"), B.opt("DamageScale"),
+    log(string.format("round %d started by %s: area=(%d,%d)-(%d,%d) waitScale=%.2f shrinkScale=%.2f damageScale=%.2f avoidEmptyNW=%s first=(%.0f,%.0f r%.0f) start blue r%.0f",
+        S.id, tostring(by), x1, y1, x2, y2, B.opt("WaitScale"), B.opt("ShrinkScale"), B.opt("DamageScale"), tostring(B.opt("AvoidEmptyNW")),
         first.x, first.y, first.r, S.from.r))
     -- 페이즈 1 벽 속도(반지름 기준 타일/초). 영역 전체에서 줄어들어 사람보다 빠르다 -> 축소 시간 조정 판단용
     local shrinkSec = B.durMs(B.PHASES[1].shrink, "shrink") / 1000
