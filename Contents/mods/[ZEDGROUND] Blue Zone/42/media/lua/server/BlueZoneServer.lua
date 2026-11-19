@@ -232,6 +232,60 @@ end
 
 -- ── 데미지 ───────────────────────────────────────────────
 
+-- 독가스 연출(Style 2) 전용: 방독면과 기침
+-- 방독면(필터가 남은 방독면·방진 마스크·급조 방독면)은 배그 전파 방해 배낭처럼 데미지를 대신 받는다:
+--   필터가 남아 있는 동안 체력 데미지·기침 없음, 받을 데미지만큼 필터가 준다 (꽉 찬 필터 = 체력 MaskFilterHealth 만큼).
+--   필터 잔량은 바닐라 Clothing 의 usedDelta(0~1, 시체 악취 방어와 같은 값)를 그대로 쓴다.
+-- 방독면이 없으면 COUGH_MIN~MAX ms 마다 기침 또는 신음. 재생은 클라가 한다(Cough 명령, BlueZoneClient.lua).
+local GAS_STYLE = 2
+local COUGH_MIN_MS, COUGH_MAX_MS = 4000, 8000
+local MOAN_CHANCE = 35          -- % : 기침 대신 고통 신음
+local MASK_SYNC_TICKS = 5       -- 필터 잔량을 클라에 보내는 주기(데미지 틱 수)
+
+local function findMask(p)
+    local worn = p:getWornItems()
+    for i = 0, worn:size() - 1 do
+        local it = worn:getItemByIndex(i)
+        if it and instanceof(it, "Clothing") and it:hasFilter() and it:getUsedDelta() > 0 then return it end
+    end
+    return nil
+end
+
+local function maskAbsorb(p, mask, amount, key)
+    local before = mask:getUsedDelta()
+    local left = before - amount / B.opt("MaskFilterHealth")
+    if left < 0 then left = 0 end
+    mask:setUsedDelta(left)
+    S.mask = S.mask or {}
+    local m = S.mask[key]
+    if not m then
+        m = { ticks = 0 }
+        S.mask[key] = m
+        log(string.format("mask %s absorbing gas: %s filter %.3f", tostring(p:getUsername()), tostring(mask:getFullType()), before))
+    end
+    m.ticks = m.ticks + 1
+    if left <= 0 then
+        S.mask[key] = nil
+        log(string.format("mask %s filter depleted (%s)", tostring(p:getUsername()), tostring(mask:getFullType())))
+    end
+    if isServer() and (left <= 0 or m.ticks % MASK_SYNC_TICKS == 0) then mask:syncItemFields() end
+end
+
+local function coughTick(p, now, key)
+    S.cough = S.cough or {}
+    local c = S.cough[key]
+    if not c then
+        c = { next = now + ZombRand(1000, 3000), count = 0 }   -- 가스에 들어가고 1~3초 뒤 첫 기침
+        S.cough[key] = c
+    end
+    if now < c.next then return end
+    c.next = now + ZombRand(COUGH_MIN_MS, COUGH_MAX_MS)
+    c.count = c.count + 1
+    local moan = ZombRand(100) < MOAN_CHANCE
+    if c.count == 1 then log(string.format("cough %s first (%s)", tostring(p:getUsername()), moan and "moan" or "cough")) end
+    toClients("Cough", { id = p:getOnlineID(), moan = moan })
+end
+
 local function damageTick(now)
     if not B.blueActive(S) then return end
     local dps = B.dpsOf(S.phase) * B.opt("DamageScale")
@@ -241,7 +295,18 @@ local function damageTick(now)
     for _, p in ipairs(players()) do
         if not p:isDead() and not p:isGodMod() then
             local x, y = p:getX(), p:getY()
-            if not B.inExempt(x, y) and B.isOutside(x, y, cx, cy, r) then
+            local pkey = tostring(p:getOnlineID())
+            local outside = not B.inExempt(x, y) and B.isOutside(x, y, cx, cy, r)
+            local gas = B.opt("Style") == GAS_STYLE
+            local mask = outside and gas and findMask(p) or nil
+            if not outside then
+                if S.cough then S.cough[pkey] = nil end
+                if S.mask then S.mask[pkey] = nil end
+            elseif mask then
+                maskAbsorb(p, mask, amount, pkey)
+                if S.cough then S.cough[pkey] = nil end
+            else
+                if gas then coughTick(p, now, pkey) end
                 local bd = p:getBodyDamage()
                 local before = bd:getOverallBodyHealth()
                 bd:ReduceGeneralHealth(amount)

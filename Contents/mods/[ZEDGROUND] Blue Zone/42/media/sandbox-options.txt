@@ -25,6 +25,11 @@ option BlueZone.FirstSize = {
     page = BlueZone, translation = BlueZone_FirstSize,
 }
 
+option BlueZone.MaskFilterHealth = {
+    type = integer, min = 1, max = 10000, default = 100,
+    page = BlueZone, translation = BlueZone_MaskFilterHealth,
+}
+
 option BlueZone.AvoidEmptyNW = {
     type = boolean, default = true,
     page = BlueZone, translation = BlueZone_AvoidEmptyNW,

@@ -59,8 +59,31 @@ function B.isPlayerOutside(p)
     return B.isOutside(x, y, cx, cy, r)
 end
 
+-- 독가스 기침·신음 (서버 Cough 명령, 구역 밖 + 방독면 없음). 바닐라 triggerCough() 에서 말풍선만 뺀 것:
+-- 기침 애니(Ext=Cough) + 성별 목소리. 본인 클라는 좀비 유인 소리(반경 35, 음량 40 - 바닐라 기침과 같은 값)도 낸다.
+-- 신음은 고통 무들이 오를 때 바닐라가 내는 PainMoodle 목소리.
+local function playCough(args)
+    local p = isClient() and getPlayerByOnlineID(args.id) or getPlayer()
+    if not p or p:isDead() then return end
+    if args.moan then
+        p:playerVoiceSound("PainMoodle")
+        return
+    end
+    p:setVariable("Ext", "Cough")
+    p:playerVoiceSound("Cough")
+    if p:isLocalPlayer() then
+        p:reportEvent("EventDoExt")
+        addSound(p, math.floor(p:getX()), math.floor(p:getY()), math.floor(p:getZ()), 35, 40)
+    end
+end
+
 function B.onServerCommand(module, command, args)
     if module ~= B.MODULE then return end
+    if command == "Cough" then
+        local ok, err = pcall(playCough, args)
+        if not ok then log("cough play FAILED: " .. tostring(err)) end
+        return
+    end
     if command == "State" then
         local prev = B.C
         local C = {}
