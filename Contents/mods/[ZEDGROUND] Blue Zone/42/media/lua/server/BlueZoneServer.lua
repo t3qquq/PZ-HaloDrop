@@ -95,14 +95,12 @@ local function pickAvoiding(what, gen)
 end
 
 -- 페이즈 1 흰 원: 영역 안에 통째로 들어가는 원. hintX/hintY 가 있으면 그 점에 가장 가까운 자리, 없으면 무작위
+-- 크기는 맵(영역) 기준: 지름 = 영역 짧은 변 x FirstSize (기본 0.71 = 기존 r1500 의 약 3배. 참고: 배그 에란겔 8km 맵에 첫 원 지름 4564.7m = 0.57)
 local function pickFirst(hintX, hintY)
     local x1, y1, x2, y2 = area()
-    local r = B.opt("FirstRadius")
-    local maxR = math.min(x2 - x1, y2 - y1) / 2
-    if r > maxR then
-        log(string.format("FirstRadius %d larger than half of area (%.0f) -> clamped", r, maxR))
-        r = maxR
-    end
+    local short = math.min(x2 - x1, y2 - y1)
+    local r = short * B.opt("FirstSize") / 2
+    log(string.format("first circle size: area short side %d x FirstSize %.2f -> r%.0f", short, B.opt("FirstSize"), r))
     if hintX and hintY then
         local cx, cy = clamp(hintX, x1 + r, x2 - r), clamp(hintY, y1 + r, y2 - r)
         log(string.format("first circle from center hint (%.0f,%.0f) -> (%.0f,%.0f)", hintX, hintY, cx, cy))
