@@ -12,8 +12,6 @@
   "Sandbox_HaloDrop_WorldY2_tooltip": "비행 범위의 남쪽 끝 (월드 타일 좌표). 가로·세로가 300 미만이면 무시된다.",
   "Sandbox_HaloDrop_AvoidEmptyNW": "빈 북서쪽 지역 피하기",
   "Sandbox_HaloDrop_AvoidEmptyNW_tooltip": "켜면 경로가 바닐라 지도의 빈 북서쪽(셀 x<45 이고 y<18 인 영역과 (45,3)~(58,0) 선 위쪽 삼각형)을 지나지 않도록 다시 뽑는다. 다른 맵을 쓰면 끈다.",
-  "Sandbox_HaloDrop_PitchRate": "기울기 변화 속도 (1/초)",
-  "Sandbox_HaloDrop_PitchRate_tooltip": "W/S 를 눌렀을 때 자세가 완전히 기울기까지 걸리는 속도. 2.0 이면 0.5초. 떼면 같은 속도로 돌아온다.",
   "Sandbox_HaloDrop_HideCarried": "탑승자 숨기기",
   "Sandbox_HaloDrop_HideCarried_tooltip": "수송기에 타고 있는 플레이어(자기 자신 포함)를 화면에서 숨긴다.",
   "Sandbox_HaloDrop_OilRigOnly": "오일리그에서만 탑승",
@@ -22,8 +20,6 @@
   "Sandbox_HaloDrop_SkyView_tooltip": "수송기 탑승 중에는 월드를 그리지 않고 지도 위의 기체를 보여줍니다 (비행 속도에선 클라이언트가 땅을 제때 못 받습니다).",
   "Sandbox_HaloDrop_SkyZoom": "하늘 뷰 지도 줌",
   "Sandbox_HaloDrop_SkyZoom_tooltip": "하늘 뷰가 쓰는 월드맵 줌 단계 (높을수록 가까이).",
-  "Sandbox_HaloDrop_JumpWaitMax": "점프: 지형 대기 최대(초)",
-  "Sandbox_HaloDrop_JumpWaitMax_tooltip": "뛰어내리기를 누른 뒤 구름 속에서 발밑 지형과 수송기가 올라오길 기다리는 최대 시간. 넘으면 그냥 떨어집니다.",
   "Sandbox_HaloDrop_SkyScale": "하늘 뷰 타일 배율 (칸당 px)",
   "Sandbox_HaloDrop_SkyScale_tooltip": "하늘 뷰가 사진 타일을 그릴 때 월드 1칸이 화면 몇 px 인지. 낮을수록 높고 멀리 보인다."
 }

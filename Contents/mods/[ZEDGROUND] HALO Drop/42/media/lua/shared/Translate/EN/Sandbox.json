@@ -12,8 +12,6 @@
   "Sandbox_HaloDrop_WorldY2_tooltip": "South edge of the flight area (world tile coordinates). Ignored if the area is smaller than 300x300.",
   "Sandbox_HaloDrop_AvoidEmptyNW": "Avoid empty north-west",
   "Sandbox_HaloDrop_AvoidEmptyNW_tooltip": "When on, routes are re-rolled so they do not cross the empty north-west of the vanilla map (cells x<45 and y<18, plus the triangle above the (45,3)-(58,0) line). Turn off for other maps.",
-  "Sandbox_HaloDrop_PitchRate": "Pitch rate (1/s)",
-  "Sandbox_HaloDrop_PitchRate_tooltip": "How fast the posture leans fully when W/S is held. 2.0 means half a second. Releasing returns at the same rate.",
   "Sandbox_HaloDrop_HideCarried": "Hide players on board",
   "Sandbox_HaloDrop_HideCarried_tooltip": "Hides players (including yourself) while they are inside the plane.",
   "Sandbox_HaloDrop_OilRigOnly": "Board only from the oil rig",
@@ -22,8 +20,6 @@
   "Sandbox_HaloDrop_SkyView_tooltip": "While aboard the plane the world is not drawn; the map with the plane is shown instead (the client cannot stream land fast enough at flight speed).",
   "Sandbox_HaloDrop_SkyZoom": "Sky view map zoom",
   "Sandbox_HaloDrop_SkyZoom_tooltip": "World map zoom level used by the sky view (higher = closer).",
-  "Sandbox_HaloDrop_JumpWaitMax": "Jump: max wait for land (s)",
-  "Sandbox_HaloDrop_JumpWaitMax_tooltip": "After pressing jump, how long to wait (under the clouds) for the land below and the plane to load before falling anyway.",
   "Sandbox_HaloDrop_SkyScale": "Sky view tile scale (px per square)",
   "Sandbox_HaloDrop_SkyScale_tooltip": "Screen pixels per world square when the sky view draws photo tiles. Lower = higher and farther."
 }

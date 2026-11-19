@@ -30,11 +30,6 @@ option HaloDrop.AvoidEmptyNW = {
     page = HaloDrop, translation = HaloDrop_AvoidEmptyNW,
 }
 
-option HaloDrop.PitchRate = {
-    type = double, min = 0.2, max = 20.0, default = 2.0,
-    page = HaloDrop, translation = HaloDrop_PitchRate,
-}
-
 option HaloDrop.HideCarried = {
     type = boolean, default = true,
     page = HaloDrop, translation = HaloDrop_HideCarried,
@@ -53,11 +48,6 @@ option HaloDrop.SkyView = {
 option HaloDrop.SkyZoom = {
     type = double, min = 6.0, max = 24.0, default = 14.0,
     page = HaloDrop, translation = HaloDrop_SkyZoom,
-}
-
-option HaloDrop.JumpWaitMax = {
-    type = integer, min = 5, max = 180, default = 45,
-    page = HaloDrop, translation = HaloDrop_JumpWaitMax,
 }
 
 option HaloDrop.SkyScale = {
