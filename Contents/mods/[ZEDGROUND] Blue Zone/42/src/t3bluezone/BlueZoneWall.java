@@ -31,6 +31,10 @@ import static org.lwjgl.opengl.GL33.*;
  * 32-bit floats stay exact for circles thousands of tiles wide.
  * Look: sandbox BlueZone.Style (read by ZoneState, the server's value reaches every client).
  *   1 field (0.2.0): PUBG-style curtain - a deep blue shimmering haze with flickering vertical lightning streaks.
+ *   2 gas (0.7.4): no more flat band at the foot of the gas (run 11-19 dynamic gas: between the edge line and the first
+ *     thick puffs the curtain only tinted the bare ground, and the far view showed through under the puffs). Puffs are
+ *     thick from 1 tile outside the line, a row of low ground puffs fills the foot, the ground fade is shorter and the
+ *     curtain is denser at its base.
  *   2 gas (0.7.3): neon mint dropped from the palette (3 colours).
  *   2 gas (0.7.2): bright artificial green that drifts through GAS_PALETTE (same clock and order as Lua
  *     BlueZone.gasColor, so the wall, the screen tint and the map fill change together). Run 11-19 green gas: the dark
@@ -90,6 +94,7 @@ public final class BlueZoneWall {
     static final float PUFF_ALPHA = 0.86f;   // one puff's peak opacity (overlap makes it solid), as in PongDu
     static final float PUFF_INSIDE_THIN = 0.65f;   // camera in the gas: puffs keep 35% so the view is a haze (the Lua tint does the rest)
     static final int MAX_PUFFS = 1400;
+    static final float FOOT_DEPTH = 14f;     // 0.7.4: tiles outside the line that get the extra low ground puffs
     static final float PUFF_BOB = 1.2f;      // 0.7.2: up-down roll (render units), period about 7 s
     static final float PUFF_SWAY = 1.8f;     // 0.7.2: sideways sway along the wind (tiles), period about 11 s
     static final float PUFF_SWELL = 0.10f;   // 0.7.2: size breathing (fraction), period about 9 s
@@ -180,7 +185,8 @@ public final class BlueZoneWall {
             "                + noise(vec2(u * 0.27 + uTime * 0.90, hgt * 0.33 - uTime * 0.60)) * 0.4;\n" +
             "        float lit = clamp(hgt / max(topH, 0.01), 0.0, 1.0) * (0.45 + 0.55 * n);\n" +
             "        vec3 c = mix(uColor.rgb * 0.62, uColor.rgb * 1.05 + vec3(0.10), lit);\n" + // 0.7.2: brighter base (was rgb * 0.30-0.42)
-            "        fragColor = vec4(c, clamp(uColor.a * (0.60 + 0.55 * n) * vf, 0.0, 0.85) * haze);\n" +
+            "        float low = 1.0 - smoothstep(0.0, topH * 0.45, hgt);\n" + // 0.7.4: denser at the base, like fog lying on the ground
+            "        fragColor = vec4(c, clamp(uColor.a * (0.60 + 0.55 * n) * vf * (1.0 + 0.6 * low), 0.0, 0.85) * haze);\n" +
             "        return;\n" +
             "    }\n" +
             "    if (uStyle > 1.5) {\n" +
@@ -280,7 +286,7 @@ public final class BlueZoneWall {
             "    vec2 rc = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * c;\n" +
             "    float n = fbm(rc * 1.7 + vec2(seed * 13.0, seed * 7.0) + vec2(time * 0.22, -time * 0.16));\n" + // 0.7.2: churn 4x faster
             "    float shape = 1.0 - smoothstep(0.38, 1.0, length(c) + (n - 0.5) * 0.7);\n" +
-            "    float al = shape * uTint.a * nearK * smoothstep(floorY, floorY + 1.4, vY);\n" + // fades into the ground instead of a straight cut
+            "    float al = shape * uTint.a * nearK * smoothstep(floorY, floorY + 0.4, vY);\n" + // fades into the ground instead of a straight cut (0.7.4: 0.4, was 1.4 and left a see-through foot)
             "    if (al < 0.003) discard;\n" +
             "    float lit = 0.50 + 0.62 * clamp(0.5 + c.y * 0.6 + (n - 0.5) * 0.7, 0.0, 1.0);\n" +
             "    vec3 col = mix(uTint.rgb * 0.75, uTint.rgb + vec3(0.10), clamp(lit - 0.45, 0.0, 1.0) * 1.5);\n" + // 0.7.2: brighter base (was rgb * 0.55-0.75)
@@ -755,23 +761,32 @@ public final class BlueZoneWall {
         float thin = 1f - PUFF_INSIDE_THIN * clamp01(camS / 8.0);
         float windRx = (float) (mm[0] * 0.85 + mm[1] * 0.53), windRz = (float) (mm[2] * 0.85 + mm[3] * 0.53);   // world wind (0.85, 0.53), as in FS
         int n = 0;
-        for (int gx = c0x; gx <= c1x && n < MAX_PUFFS - 3; gx++) {
-            for (int gy = c0y; gy <= c1y && n < MAX_PUFFS - 3; gy++) {
+        for (int gx = c0x; gx <= c1x && n < MAX_PUFFS - 4; gx++) {
+            for (int gy = c0y; gy <= c1y && n < MAX_PUFFS - 4; gy++) {
                 double wx = (gx + 0.15 + 0.7 * ih(gx, gy, 1)) * PUFF_CELL, wy = (gy + 0.15 + 0.7 * ih(gx, gy, 2)) * PUFF_CELL;
                 double s = Math.hypot(wx - blue[0], wy - blue[1]) - blue[2];
                 if (s < 1 || s > PUFF_DEPTH) continue;                                 // 0.7.1: was -3, puffs spilled into the safe zone
                 double d = Math.hypot(wx - camWX, wy - camWY);
                 if (d > PUFF_RANGE) continue;
-                float band = clamp01((s - 1) / 6.0) * (1f - clamp01((s - PUFF_DEPTH * 0.75) / (PUFF_DEPTH * 0.25)));
+                float band = clamp01(0.4 + (s - 1) * 0.3) * (1f - clamp01((s - PUFF_DEPTH * 0.75) / (PUFF_DEPTH * 0.25)));
                 float edge = 1f - clamp01((d - PUFF_RANGE * 0.7) / (PUFF_RANGE * 0.3));
                 float a0 = PUFF_ALPHA * band * edge * thin;
                 if (a0 < 0.01f) continue;
                 double dx = wx - org.x(), dy = wy - org.y();
                 float rx = (float) (mm[0] * dx + mm[1] * dy), rz = (float) (mm[2] * dx + mm[3] * dy);
-                for (int layer = 0; layer < 3; layer++) {
-                    float chance = layer == 0 ? 1f : layer == 1 ? 0.55f : 0.22f;
+                // 0.7.4 layer 3: a low ground puff beside the cell's main puff, only in the first FOOT_DEPTH tiles outside the
+                // line. It sits half a cell along the circle (tangent), so its distance from the line stays the same.
+                double radX = wx - blue[0], radY = wy - blue[1], radL = Math.max(Math.hypot(radX, radY), 0.001);
+                double tOff = (ih(gx, gy, 50) < 0.5f ? -0.5 : 0.5) * PUFF_CELL;
+                double fdx = dx - radY / radL * tOff, fdy = dy + radX / radL * tOff;
+                float frx = (float) (mm[0] * fdx + mm[1] * fdy), frz = (float) (mm[2] * fdx + mm[3] * fdy);
+                for (int layer = 0; layer < 4; layer++) {
+                    if (layer == 3 && s > FOOT_DEPTH) continue;
+                    float chance = layer == 0 || layer == 3 ? 1f : layer == 1 ? 0.55f : 0.22f;
                     if (ih(gx, gy, 20 + layer) > chance) continue;
                     float size, cy;
+                    float bx = layer == 3 ? frx : rx, bz = layer == 3 ? frz : rz;
+                    if (layer == 3) { size = 6f + 2f * ih(gx, gy, 12); cy = size * 0.26f; } else
                     if (layer == 0) { size = 10f + 3.5f * ih(gx, gy, 4); cy = size * (0.32f + 0.06f * ih(gx, gy, 3)); }   // lower edge reaches the ground
                     else if (layer == 1) { size = 8.5f + 3f * ih(gx, gy, 6); cy = 8f + 3f * ih(gx, gy, 7); }
                     else { size = 9f + 4f * ih(gx, gy, 9); cy = 15f + 5f * ih(gx, gy, 10); }
@@ -780,7 +795,7 @@ public final class BlueZoneWall {
                     float ry = GAS_GROUND + cy + PUFF_BOB * (float) Math.sin(time * 0.9 + ph);
                     size *= 1f + PUFF_SWELL * (float) Math.sin(time * 0.7 + ph * 1.7);
                     float sway = PUFF_SWAY * (float) Math.sin(time * 0.55 + ph * 2.3);
-                    float px = rx + sway * windRx, pz = rz + sway * windRz;                 // sway along the wind (same direction as the shell drift)
+                    float px = bx + sway * windRx, pz = bz + sway * windRz;                 // sway along the wind (same direction as the shell drift)
                     double ex = px - cam[0], ey = ry - cam[1], ez = pz - cam[2];
                     float dist = (float) Math.sqrt(ex * ex + ey * ey + ez * ez);
                     int o = n * 6;
